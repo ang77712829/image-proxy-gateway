@@ -20,9 +20,41 @@ metadata:
 4. **Agnes 高级图片能力**：Agnes 的文生图、图生图、多图参考、局部重绘等详细示例见 `docs/AGNES_IMAGE_CALL_EXAMPLES.md`。
 5. **开发或新增渠道**：转到 `DEVELOPMENT.md` 或独立适配文档。
 
+## v0.2 项目结构
+
+GitHub 仓库：`ang77712829/image-proxy-gateway`
+
+```
+image-proxy-gateway/
+├── SKILL.md                          ← 本技能文档
+├── README.md / README_CN.md          ← 用户文档（安装、配置、API）
+├── DEVELOPMENT.md                    ← 开发指南（新增渠道/适配器）
+├── .env.example                      ← 环境变量模板
+├── requirements.txt                  ← Python 依赖
+├── Dockerfile                        ← Docker 构建
+├── templates/docker-compose.yml      ← Compose 模板
+├── scripts/
+│   ├── proxy.py                      ← 轻量代理（无视频）
+│   └── image-gateway/
+│       ├── gateway.py                ← 主网关（图片+视频）
+│       └── adapters/
+│           └── agnes_video.py        ← Agnes 视频适配器
+├── docs/
+│   ├── AGNES_IMAGE_CALL_EXAMPLES.md  ← Agnes 图片能力详解
+│   ├── AGNES_VIDEO_CALL_EXAMPLES.md  ← Agnes 视频能力详解
+│   ├── AGNAS_MODEL_CALL_EXAMPLES.md  ← Agnes 总索引
+│   └── VIDEO_ADAPTER_DESIGN.md       ← 视频适配器设计
+└── references/                       ← 知识库参考文件
+    ├── agnes-ai-integration.md
+    ├── agnes-ai-knowledge-base.md
+    └── video-prompt-guide.md
+```
+
+⚠️ `scripts/proxy.py` 和 `scripts/image-gateway/gateway.py` 是两个不同入口。`proxy.py` 是轻量图片代理，`gateway.py` 包含完整图片+视频能力。OpenClaw 工作区通常用 `gateway.py`。
+
 ## 首次安装最小流程
 
-当用户说“安装这个技能”“部署图片网关”“让 Agent 能画图”，执行最小流程：
+当用户说"安装这个技能""部署图片网关""让 Agent 能画图"，执行最小流程：
 
 ```bash
 git clone https://github.com/ang77712829/image-proxy-gateway.git
@@ -174,6 +206,44 @@ Agnes 图片 2.1，显式调用：
 - 视频代码入口：`scripts/image-gateway/adapters/agnes_video.py`
 - 这些文档展开讲调用方式；本技能主体只保留运行时需要的最小规则。
 
+## GitHub 仓库同步
+
+仓库地址：`ang77712829/image-proxy-gateway`
+
+当用户说"拉最新代码""更新技能""同步 GitHub"时：
+
+```bash
+# 拉取最新代码
+gh repo clone ang77712829/image-proxy-gateway /tmp/image-proxy-gateway-latest
+
+# 同步到三个位置
+# 1. Hermes skills
+cp -r /tmp/image-proxy-gateway-latest/* ~/.hermes/skills/devops/image-proxy-gateway/
+
+# 2. OpenClaw skills
+cp -r /tmp/image-proxy-gateway-latest/* ~/.openclaw/workspace/skills/image-proxy-gateway/
+
+# 3. 生产环境（gateway.py + adapters + docs）
+cp /tmp/image-proxy-gateway-latest/scripts/image-gateway/gateway.py ~/.openclaw/workspace/scripts/image-gateway/
+cp -r /tmp/image-proxy-gateway-latest/scripts/image-gateway/adapters/ ~/.openclaw/workspace/scripts/image-gateway/adapters/
+cp -r /tmp/image-proxy-gateway-latest/docs/ ~/.openclaw/workspace/scripts/image-gateway/docs/
+```
+
+⚠️ 注意：中文路径 SCP 会编码失败，用 `scp file nas:/tmp/` 传到临时位置再 `ssh nas "mv /tmp/file '目标路径'"` 移动。
+
+## 各模型分辨率参考
+
+各渠道模型支持的尺寸、最大分辨率和约束条件，详见 `docs/MODEL_RESOLUTION_REFERENCE.md`。
+
+快速摘要：
+- **Kolors**：固定 5 种尺寸（最大 960×1280），不在列表中的回退到 1024×1024
+- **ModelScope**：文档未明确上限，默认 1024×1024
+- **Agnes Image**：实测最大 2048×1536，推荐默认 1024×768
+- **Agnes Video**：实测最大 2048×1536，推荐默认 1152×768，最长 18.4 秒（441 帧/24fps）
+- **Pollinations**：支持任意尺寸，建议 512–2048
+
+Agnes 视频调用方式见 `docs/AGNES_VIDEO_CALL_EXAMPLES.md`。
+
 ## 失败处理
 
 - `/health` 连不上：提示用户检查网关是否启动、端口是否正确、是否在另一台机器上运行。
@@ -192,3 +262,11 @@ Agnes 图片 2.1，显式调用：
 - 普通请求误用 `gpt-image-2` 这类付费别名。
 - 把魔搭本地计数器当成真实余额；本地计数只是保护值，真实额度以平台返回为准。
 - 新请求优先用 `kolors`，`siliconflow` 只是兼容别名。
+
+## ⚠️ Agnes API 参数规则（已踩坑修复）
+
+**核心规则**：Agnes API 的可选参数（`response_format`、`quality`、`user`、`safe`、`negative_prompt`、`seed`）必须放在 `extra_body` 下面，不支持顶层传递。
+
+**修复记录**：v0.2 commit `04f683f`（2026-06-03），由用户朋友实际使用时发现报错。原代码将这些参数作为顶层字段传递，导致 Agnes API 返回"不支持的参数"错误。
+
+**Agnes API 的 extra_body 模式**：Agnes 虽然声称 OpenAI 兼容，但扩展参数（图片编辑、视频控制、响应格式等）全部走 `extra_body`。调用网关时这些由 `AgnesImageProvider` 自动处理；直接调用 Agnes API 时需要注意。详见 `references/agnes-ai-integration.md`。
