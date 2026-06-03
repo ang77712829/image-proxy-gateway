@@ -173,6 +173,11 @@ class AgnesVideoProvider:
         data = dict(data)
         data.setdefault("task_id", task_id)
         video_url = data.get("video_url") or data.get("remixed_from_video_id") or data.get("url") or data.get("output_url")
+        # ⚠️ Agnes API 命名不规范：remixed_from_video_id 实际返回的是完整视频 URL 而非视频 ID
         if video_url:
             data["video_url"] = video_url
+            # 有些 Agnes 响应已经给出视频地址，但不一定带标准完成状态。
+            # 同步等待时如果没有状态，这里补成 completed，避免拿到地址后仍然轮询到超时。
+            if not data.get("status"):
+                data["status"] = "completed"
         return data
