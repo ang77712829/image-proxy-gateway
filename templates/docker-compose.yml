@@ -1,0 +1,18 @@
+services:
+  image-proxy:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "9890:9890"
+    environment:
+      - PROXY_PORT=9890
+      - IMAGE_PROXY_STATE_DIR=/data
+      # 如果 Agent / New-API 不在网关同一台机器，请改成局域网 IP 或域名
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://localhost:9890}
+    volumes:
+      - image-proxy-data:/data
+    restart: unless-stopped
+
+volumes:
+  image-proxy-data:
