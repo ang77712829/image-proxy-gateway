@@ -40,36 +40,37 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           echo "Packaging AngeMedia Gateway ${VERSION}"
 
-          # Package gateway - write to /tmp to avoid "file changed as we read it"
-          cd scripts/image-proxy-gateway
+          # Package full repo (gateway + skill + docs) to /tmp first
+          cd "${GITHUB_WORKSPACE}"
           tar czf "/tmp/angemedia-gateway-${VERSION}.tar.gz" \
-            --exclude='__pycache__' \
             --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
             --exclude='AUDIT*.md' \
             --exclude='HANDOFF*.md' \
             --exclude='*.zip' \
             --exclude='*.tar.gz' \
+            --exclude='.DS_Store' \
             .
           cp "/tmp/angemedia-gateway-${VERSION}.tar.gz" "${GITHUB_WORKSPACE}/"
-          cd "${GITHUB_WORKSPACE}"
 
-          # Package skill
+          # Package skill only (docs for AI agent use)
           mkdir -p /tmp/skill-pkg
           cp skill/SKILL.md /tmp/skill-pkg/
           cp skill/README.md /tmp/skill-pkg/
           cp -r skill/docs /tmp/skill-pkg/
           cd /tmp/skill-pkg
-          tar czf "${GITHUB_WORKSPACE}/angemedia-gateway-skill-${VERSION}.tar.gz" .
+          tar czf "${GITHUB_WORKSPACE}/angemedia-skill-${VERSION}.tar.gz" .
 
           echo "Packages created:"
-          ls -lh "${GITHUB_WORKSPACE}"/angemedia-gateway-*.tar.gz
+          ls -lh "${GITHUB_WORKSPACE}"/angemedia-*.tar.gz
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             angemedia-gateway-${{ github.ref_name }}.tar.gz
-            angemedia-gateway-skill-${{ github.ref_name }}.tar.gz
+            angemedia-skill-${{ github.ref_name }}.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: false
