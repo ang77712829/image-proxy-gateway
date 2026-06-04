@@ -3,32 +3,68 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import config as C
 from ..assistant import assistant_enabled, build_assistant_plan
-from ..media import localize_image_result, localize_video_result, maybe_to_b64
 from ..providers.base import BackendUnavailable, RateLimited
-from ..providers.custom import generate_custom_openai_image
-from ..routing import MODEL_ALIASES, build_route_response, enhance_prompt_text, resolve_chain
+from ..routing import MODEL_ALIASES, build_route_response, enhance_prompt_text
 from ..schemas import AssistantRequest, EnhanceRequest, ImageRequest, RouteRequest, VideoRequest
-from ..security import redact_secret_text, validate_task_id
+from ..security import redact_secret_text
+from ..services.media_service import (
+    CustomProviderNotFound,
+    ImageProvidersFailed,
+    MediaService,
+    NoImageProviderAvailable,
+    VideoProviderDisabled,
+)
 from ..state import (
     builtin_provider_enabled,
     get_config,
-    get_custom_provider,
     list_custom_providers,
-    now_iso,
-    record_generation,
-    upsert_video_task,
 )
-from ..runtime import PROVIDERS, agnes_video, require_auth
+from ..runtime import require_auth
 
 log = logging.getLogger("angemedia-gateway")
 router = APIRouter()
+media_service = MediaService()
+
+
+async def _create_image_response(req: ImageRequest) -> dict[str, Any]:
+    try:
+        return await media_service.create_image(req)
+    except CustomProviderNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NoImageProviderAvailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RateLimited as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ImageProvidersFailed as exc:
+        raise HTTPException(status_code=502, detail={"message": "all image providers failed", "errors": exc.errors}) from exc
+    except BackendUnavailable as exc:
+        raise HTTPException(status_code=502, detail=redact_secret_text(str(exc))) from exc
+
+
+async def _create_video_response(req: VideoRequest) -> dict[str, Any]:
+    try:
+        return await media_service.create_video(req)
+    except VideoProviderDisabled as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        log.exception("Agnes AI 视频生成失败")
+        raise HTTPException(status_code=502, detail=f"Agnes AI 视频生成失败：{exc}") from exc
+
+
+async def _get_video_response(task_id: str) -> dict[str, Any]:
+    try:
+        return await media_service.get_video(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        log.exception("Agnes AI 视频任务查询失败")
+        raise HTTPException(status_code=502, detail=f"Agnes AI 视频任务查询失败：{redact_secret_text(str(exc))}") from exc
 
 
 @router.get("/health")
@@ -139,7 +175,7 @@ async def assistant_generate(req: AssistantRequest) -> dict[str, Any]:
             frame_rate=float(plan.get("frame_rate", 24)),
             wait_for_completion=bool(plan.get("wait_for_completion", req.wait_for_completion)),
         )
-        result = await create_video(video_req)
+        result = await _create_video_response(video_req)
         result["assistant_plan"] = plan
         return result
 
@@ -150,192 +186,21 @@ async def assistant_generate(req: AssistantRequest) -> dict[str, Any]:
         response_format="url",
         negative_prompt=plan.get("negative_prompt"),
     )
-    result = await create_image(image_req)
+    result = await _create_image_response(image_req)
     result["assistant_plan"] = plan
     return result
 
 
 @router.post("/v1/images/generations", dependencies=[Depends(require_auth)])
 async def create_image(req: ImageRequest) -> dict[str, Any]:
-    if req.model and req.model.startswith("custom:"):
-        provider_id = req.model.split(":", 1)[1]
-        provider = get_custom_provider(provider_id, include_secret=True)
-        if provider is None:
-            raise HTTPException(status_code=404, detail=f"自定义渠道不存在：{provider_id}")
-        try:
-            started_at = now_iso()
-            started = time.perf_counter()
-            result = await generate_custom_openai_image(req, provider)
-            if req.response_format == "url":
-                result = await localize_image_result(result, f"custom_{provider_id}", provider.get("default_model", "custom"))
-            elif req.response_format == "b64_json":
-                result = await maybe_to_b64(result, req.response_format)
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            result["provider"] = f"custom:{provider_id}"
-            result["model"] = str(provider.get("default_model") or f"custom:{provider_id}")
-            result["duration_ms"] = duration_ms
-            record_id = record_generation(
-                media_type="image",
-                prompt=req.prompt,
-                enhanced_prompt=None,
-                model=f"custom:{provider_id}",
-                status="completed",
-                result=result,
-                provider=f"custom:{provider_id}",
-                request_model=req.model,
-                input_mode="custom_provider",
-                duration_ms=duration_ms,
-                started_at=started_at,
-            )
-            result["history_id"] = record_id
-            return result
-        except RateLimited as exc:
-            raise HTTPException(status_code=429, detail=str(exc)) from exc
-        except BackendUnavailable as exc:
-            raise HTTPException(status_code=502, detail=redact_secret_text(str(exc))) from exc
-
-    chain = resolve_chain(req.model)
-    if not chain:
-        raise HTTPException(status_code=503, detail="当前没有可用图片渠道：所选模型已停用或默认链路全部停用")
-    errors: list[str] = []
-
-    for target in chain:
-        backend = target.provider
-        model = target.model
-        provider = PROVIDERS.get(backend)
-        if provider is None:
-            errors.append(f"{backend}/{model}: unknown provider")
-            continue
-
-        try:
-            started_at = now_iso()
-            started = time.perf_counter()
-            result = await provider.generate(req, target)
-            if req.response_format == "url":
-                result = await localize_image_result(result, backend, model)
-            elif backend != "pollinations":
-                result = await maybe_to_b64(result, req.response_format)
-
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            result["provider"] = backend
-            result["model"] = model
-            result["request_model"] = req.model or ""
-            result["duration_ms"] = duration_ms
-            record_id = record_generation(
-                media_type="image",
-                prompt=req.prompt,
-                enhanced_prompt=None,
-                model=model,
-                status="completed",
-                result=result,
-                provider=backend,
-                request_model=req.model or "",
-                input_mode="default_chain" if not req.model else "explicit_model",
-                duration_ms=duration_ms,
-                started_at=started_at,
-            )
-            result["history_id"] = record_id
-            log.info("%s succeeded: model=%s", backend, model)
-            return result
-        except RateLimited as exc:
-            message = f"{backend}/{model}: {exc}"
-            log.warning(message)
-            errors.append(message)
-            continue
-        except BackendUnavailable as exc:
-            message = f"{backend}/{model}: {exc}"
-            log.warning(message)
-            errors.append(message)
-            continue
-        except Exception as exc:
-            message = f"{backend}/{model}: unexpected {type(exc).__name__}: {exc}"
-            log.exception(message)
-            errors.append(message)
-            continue
-
-    raise HTTPException(status_code=502, detail={"message": "all image providers failed", "errors": errors})
+    return await _create_image_response(req)
 
 
 @router.post("/v1/videos", dependencies=[Depends(require_auth)])
 async def create_video(req: VideoRequest) -> dict[str, Any]:
-    if not builtin_provider_enabled("agnes_video"):
-        raise HTTPException(status_code=503, detail="Agnes 视频渠道已停用，请在管理后台恢复后再生成")
-    try:
-        started_at = now_iso()
-        started = time.perf_counter()
-        if req.wait_for_completion:
-            result = await agnes_video.generate_video(req)
-            result = await localize_video_result(result)
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            result["provider"] = "agnes_video"
-            result["model"] = req.model
-            result["duration_ms"] = duration_ms
-            task_id = str(result.get("task_id") or result.get("id") or "")
-            if task_id:
-                upsert_video_task(task_id, req.prompt, req.model, str(result.get("status") or "completed"), result, duration_ms=duration_ms)
-            record_id = record_generation(
-                media_type="video",
-                prompt=req.prompt,
-                enhanced_prompt=None,
-                model=req.model,
-                status=str(result.get("status") or "completed"),
-                result=result,
-                task_id=task_id or None,
-                provider="agnes_video",
-                request_model=req.model,
-                input_mode=req.mode or ("image" if req.image or req.images else "text"),
-                duration_ms=duration_ms,
-                started_at=started_at,
-            )
-            result["history_id"] = record_id
-            return result
-
-        result = await agnes_video.submit_task(req)
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        result["provider"] = "agnes_video"
-        result["model"] = req.model
-        result["duration_ms"] = duration_ms
-        task_id = str(result.get("task_id") or result.get("id") or "")
-        if task_id:
-            upsert_video_task(task_id, req.prompt, req.model, str(result.get("status") or "submitted"), result, duration_ms=duration_ms)
-        record_id = record_generation(
-            media_type="video",
-            prompt=req.prompt,
-            enhanced_prompt=None,
-            model=req.model,
-            status=str(result.get("status") or "submitted"),
-            result=result,
-            task_id=task_id or None,
-            provider="agnes_video",
-            request_model=req.model,
-            input_mode=req.mode or ("image" if req.image or req.images else "text"),
-            duration_ms=duration_ms,
-            started_at=started_at,
-        )
-        result["history_id"] = record_id
-        return result
-    except Exception as exc:
-        log.exception("Agnes AI 视频生成失败")
-        raise HTTPException(status_code=502, detail=f"Agnes AI 视频生成失败：{exc}") from exc
+    return await _create_video_response(req)
 
 
 @router.get("/v1/videos/{task_id}", dependencies=[Depends(require_auth)])
 async def get_video(task_id: str) -> dict[str, Any]:
-    try:
-        task_id = validate_task_id(task_id)
-        result = await agnes_video.poll_task(task_id)
-        result = await localize_video_result(result)
-        upsert_video_task(
-            task_id,
-            str(result.get("prompt") or ""),
-            str(result.get("model") or "agnes-video-v2.0"),
-            str(result.get("status") or "unknown"),
-            result,
-            duration_ms=int(result.get("duration_ms") or 0),
-        )
-        return result
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        log.exception("Agnes AI 视频任务查询失败")
-        raise HTTPException(status_code=502, detail=f"Agnes AI 视频任务查询失败：{redact_secret_text(str(exc))}") from exc
+    return await _get_video_response(task_id)
