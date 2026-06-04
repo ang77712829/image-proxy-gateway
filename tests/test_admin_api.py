@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +19,7 @@ os.environ.setdefault("SILICONFLOW_API_KEY", "sf-test-secret-value")
 os.environ.setdefault("ADMIN_USERNAME", "admin")
 os.environ.setdefault("ADMIN_DEFAULT_PASSWORD", "admin123456")
 
+from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from angemedia_gateway.server import app  # noqa: E402
@@ -53,7 +55,13 @@ class AdminApiWriteTest(unittest.TestCase):
     def unique_provider_id(self, prefix: str = "phase-12b") -> str:
         return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
-    def create_custom_provider(self, provider_id: str, sort_order: int = 100, enabled: bool = True) -> dict:
+    def create_custom_provider(
+        self,
+        provider_id: str,
+        sort_order: int = 100,
+        enabled: bool = True,
+        default_model: str = "test-image-model",
+    ) -> dict:
         self.created_provider_ids.append(provider_id)
         response = self.client.post(
             "/v1/admin/providers",
@@ -63,13 +71,33 @@ class AdminApiWriteTest(unittest.TestCase):
                 "provider_type": "openai_image",
                 "base_url": "https://example.com/v1",
                 "api_key": f"sk-{provider_id}-secret",
-                "default_model": "test-image-model",
+                "default_model": default_model,
                 "enabled": enabled,
                 "sort_order": sort_order,
             },
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["data"]
+
+    def provider_list_row(self, provider_id: str) -> dict:
+        response = self.client.get("/v1/admin/providers")
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = {item["id"]: item for item in response.json()["data"]}
+        self.assertIn(provider_id, rows)
+        return rows[provider_id]
+
+    def provider_status_row(self, provider_id: str) -> dict:
+        response = self.client.get("/v1/admin/provider-status")
+        self.assertEqual(response.status_code, 200, response.text)
+        rows = {item["id"]: item for item in response.json()["custom"]}
+        self.assertIn(provider_id, rows)
+        return rows[provider_id]
+
+    def assert_provider_test_state(self, provider_id: str, status: str, error: str | None = None) -> None:
+        for row in (self.provider_list_row(provider_id), self.provider_status_row(provider_id)):
+            self.assertEqual(row["last_test_status"], status)
+            if error is not None:
+                self.assertEqual(row["last_error"], error)
 
     def test_admin_config_rejects_invalid_values(self) -> None:
         invalid_payloads = [
@@ -294,6 +322,113 @@ class AdminApiWriteTest(unittest.TestCase):
             self.assertEqual(enabled_custom["default_model"], before_custom["default_model"])
         finally:
             self.client.post("/v1/admin/providers/siliconflow/enabled", json={"enabled": original_enabled})
+
+    def test_provider_test_models_success_updates_status(self) -> None:
+        provider_id = self.unique_provider_id("test-ok")
+        secret = f"sk-{provider_id}-secret"
+        self.create_custom_provider(provider_id, default_model="target-model")
+
+        fetch_models = AsyncMock(return_value=(["target-model", "other-model"], 37))
+        with patch("angemedia_gateway.routes.admin.fetch_openai_model_ids", new=fetch_models):
+            response = self.client.post(f"/v1/admin/providers/{provider_id}/test")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["models"], ["target-model", "other-model"])
+        self.assertEqual(body["elapsed_ms"], 37)
+        self.assertEqual(body["data"]["last_test_status"], "ok")
+        self.assertEqual(body["data"]["last_response_ms"], 37)
+        self.assertNotIn(secret, response.text)
+        fetch_models.assert_awaited_once_with("https://example.com/v1", secret)
+        self.assert_provider_test_state(provider_id, "ok", "")
+
+    def test_provider_test_models_missing_default_updates_model_not_listed(self) -> None:
+        provider_id = self.unique_provider_id("test-missing")
+        self.create_custom_provider(provider_id, default_model="target-model")
+
+        fetch_models = AsyncMock(return_value=(["other-model"], 42))
+        with patch("angemedia_gateway.routes.admin.fetch_openai_model_ids", new=fetch_models):
+            response = self.client.post(f"/v1/admin/providers/{provider_id}/test")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["models"], ["other-model"])
+        self.assertEqual(body["elapsed_ms"], 42)
+        self.assertEqual(body["data"]["last_test_status"], "model_not_listed")
+        self.assertEqual(body["data"]["last_error"], "默认模型不在 /models 返回列表中")
+        self.assert_provider_test_state(provider_id, "model_not_listed", "默认模型不在 /models 返回列表中")
+
+    def test_provider_test_models_http_failure_writes_failed_before_502(self) -> None:
+        provider_id = self.unique_provider_id("test-http-fail")
+        self.create_custom_provider(provider_id, default_model="target-model")
+        detail = "模型列表拉取失败：HTTP 500 {\"error\":\"bad\"}"
+
+        fetch_models = AsyncMock(side_effect=HTTPException(status_code=502, detail=detail))
+        with patch("angemedia_gateway.routes.admin.fetch_openai_model_ids", new=fetch_models):
+            response = self.client.post(f"/v1/admin/providers/{provider_id}/test")
+
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(response.json()["detail"], detail)
+        self.assert_provider_test_state(provider_id, "failed", detail)
+
+    def test_provider_test_models_plain_exception_returns_failed_payload(self) -> None:
+        provider_id = self.unique_provider_id("test-exception")
+        self.create_custom_provider(provider_id, default_model="target-model")
+
+        fetch_models = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch("angemedia_gateway.routes.admin.fetch_openai_model_ids", new=fetch_models):
+            response = self.client.post(f"/v1/admin/providers/{provider_id}/test")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["message"], "连接测试失败：boom")
+        self.assertEqual(body["data"]["last_test_status"], "failed")
+        self.assert_provider_test_state(provider_id, "failed", "boom")
+
+    def test_builtin_provider_test_response_without_external_fetch_or_custom_status_write(self) -> None:
+        status = self.client.get("/v1/admin/provider-status")
+        self.assertEqual(status.status_code, 200, status.text)
+        built_in_rows = {item["id"]: item for item in status.json()["built_in"]}
+        original_siliconflow_enabled = bool(built_in_rows["siliconflow"]["enabled"])
+        original_openai_image_enabled = bool(built_in_rows["openai_image"]["enabled"])
+
+        custom_id = self.unique_provider_id("builtin-test")
+        self.create_custom_provider(custom_id)
+        before = self.provider_list_row(custom_id)
+
+        fetch_models = AsyncMock(return_value=(["should-not-be-used"], 1))
+        try:
+            self.client.post("/v1/admin/config", json={"settings": {"OPENAI_IMAGE_API_KEY": ""}})
+            self.client.post("/v1/admin/providers/siliconflow/enabled", json={"enabled": True})
+            self.client.post("/v1/admin/providers/openai_image/enabled", json={"enabled": True})
+
+            with patch("angemedia_gateway.routes.admin.fetch_openai_model_ids", new=fetch_models):
+                ready = self.client.post("/v1/admin/providers/siliconflow/test")
+                missing = self.client.post("/v1/admin/providers/openai_image/test")
+
+            self.assertEqual(ready.status_code, 200, ready.text)
+            ready_body = ready.json()
+            self.assertTrue(ready_body["ok"])
+            self.assertEqual(ready_body["data"]["id"], "siliconflow")
+            self.assertEqual(ready_body["message"], "渠道已启用且关键配置存在")
+
+            self.assertEqual(missing.status_code, 200, missing.text)
+            missing_body = missing.json()
+            self.assertFalse(missing_body["ok"])
+            self.assertEqual(missing_body["data"]["id"], "openai_image")
+            self.assertEqual(missing_body["message"], "渠道未启用或缺少关键配置")
+            fetch_models.assert_not_awaited()
+
+            after = self.provider_list_row(custom_id)
+            self.assertEqual(after["last_test_status"], before["last_test_status"])
+            self.assertEqual(after["last_response_ms"], before["last_response_ms"])
+            self.assertEqual(after["last_error"], before["last_error"])
+        finally:
+            self.client.post("/v1/admin/providers/siliconflow/enabled", json={"enabled": original_siliconflow_enabled})
+            self.client.post("/v1/admin/providers/openai_image/enabled", json={"enabled": original_openai_image_enabled})
 
 
 if __name__ == "__main__":
