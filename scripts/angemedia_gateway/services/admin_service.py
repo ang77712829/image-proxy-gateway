@@ -8,8 +8,9 @@ import httpx
 
 from .. import config as C
 from ..assistant import assistant_allow_agnes, assistant_allow_paid, assistant_enabled
-from ..security import ensure_public_http_url
-from ..state import builtin_provider_enabled, config_snapshot, get_config, list_custom_providers
+from ..runtime import refresh_runtime
+from ..security import ensure_public_http_url, generate_gateway_key
+from ..state import builtin_provider_enabled, config_snapshot, get_config, list_custom_providers, set_config_many
 
 
 BUILTIN_PROVIDER_META: list[dict[str, Any]] = [
@@ -196,6 +197,19 @@ class AdminService:
             "custom_providers": list_custom_providers(include_secret=False),
             "provider_templates": PROVIDER_TEMPLATES,
         }
+
+    def save_config(self, settings: dict[str, Any]) -> dict[str, Any]:
+        set_config_many(settings)
+        refresh_runtime()
+        return self.admin_config()
+
+    def create_gateway_key(self, save: bool) -> dict[str, Any]:
+        key = generate_gateway_key()
+        if save:
+            set_config_many({"GATEWAY_API_KEY": key})
+            refresh_runtime()
+            return {"saved": True, "key_preview": key[:7] + "****" + key[-4:]}
+        return {"key": key, "saved": False}
 
     async def provider_status(self) -> dict[str, Any]:
         built_in = self.builtin_provider_rows()

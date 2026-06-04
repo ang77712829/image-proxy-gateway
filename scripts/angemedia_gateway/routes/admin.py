@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Cookie, Depends, Header, HTTPException, Req
 
 from ..config_metadata import metadata_response, validate_config_settings
 from ..schemas import ConfigUpdateRequest
-from ..security import ensure_public_http_url, generate_gateway_key
+from ..security import ensure_public_http_url
 from ..services.admin_service import AdminService
 from ..state import (
     BUILTIN_PROVIDER_CONFIG_KEYS,
@@ -26,7 +26,6 @@ from ..state import (
     list_custom_providers,
     record_admin_login_failure,
     set_builtin_provider_enabled,
-    set_config_many,
     update_custom_provider_enabled,
     update_custom_provider_sort,
     update_custom_provider_test,
@@ -143,20 +142,13 @@ async def get_admin_config_metadata() -> dict[str, Any]:
 @router.post("/v1/admin/config", dependencies=[Depends(require_admin_auth)])
 async def update_admin_config(req: ConfigUpdateRequest) -> dict[str, Any]:
     settings = validate_config_settings(dict(req.settings))
-    set_config_many(settings)
-    refresh_runtime()
-    return await get_admin_config()
+    return admin_service.save_config(settings)
 
 
 @router.post("/v1/admin/gateway-key", dependencies=[Depends(require_admin_auth)])
 async def create_gateway_key(save: bool = Body(True, embed=True)) -> dict[str, Any]:
     """生成 am- 前缀网关密钥。save=true 时自动写入配置并立即生效。"""
-    key = generate_gateway_key()
-    if save:
-        set_config_many({"GATEWAY_API_KEY": key})
-        refresh_runtime()
-        return {"saved": True, "key_preview": key[:7] + "****" + key[-4:]}
-    return {"key": key, "saved": False}
+    return admin_service.create_gateway_key(save)
 
 
 @router.get("/v1/admin/providers", dependencies=[Depends(require_admin_auth)])
