@@ -19,21 +19,32 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Syntax check
-        run: find scripts/ -name "*.py" -exec python -m py_compile {} +
-
-      - name: Import test
         run: |
-          cd scripts
-          python -c "
-          from angemedia_gateway import config, security, routing, schemas
-          from angemedia_gateway.routes import admin, media, pages, storage
-          from angemedia_gateway.providers import image, custom, base
-          print('All imports OK')
-          "
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Repository hygiene
+        run: |
+          forbidden="$(find . -maxdepth 1 \( -name 'AUDIT*.md' -o -name 'HANDOFF*.md' -o -name '*Release-Report*.md' -o -name 'DEVELOPMENT.md' \) -print)"
+          if [ -n "$forbidden" ]; then
+            echo "Forbidden development documents found:"
+            echo "$forbidden"
+            exit 1
+          fi
+
+      - name: Syntax and tests
+        run: |
+          python -m compileall scripts tests
+          for f in app/www/assets/*.js; do
+            node --check "$f"
+          done
+          python -m unittest discover -s tests -v
 
       - name: Package gateway
         run: |
@@ -44,15 +55,33 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           tar czf "/tmp/angemedia-gateway-${VERSION}.tar.gz" \
             --exclude='.git' \
+            --exclude='.env' \
+            --exclude='.pytest_cache' \
+            --exclude='.ruff_cache' \
+            --exclude='.mypy_cache' \
+            --exclude='.venv' \
+            --exclude='node_modules' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='*.log' \
             --exclude='AUDIT*.md' \
             --exclude='HANDOFF*.md' \
+            --exclude='*Release-Report*.md' \
+            --exclude='DEVELOPMENT.md' \
+            --exclude='generated' \
+            --exclude='uploads' \
+            --exclude='output' \
             --exclude='*.zip' \
             --exclude='*.tar.gz' \
             --exclude='.DS_Store' \
             .
           cp "/tmp/angemedia-gateway-${VERSION}.tar.gz" "${GITHUB_WORKSPACE}/"
+
+          if tar tzf "${GITHUB_WORKSPACE}/angemedia-gateway-${VERSION}.tar.gz" | grep -E '(^|/)(\.env|generated/|uploads/|output/|DEVELOPMENT\.md|AUDIT[^/]*\.md|HANDOFF[^/]*\.md|.*Release-Report.*\.md)$'; then
+            echo "Gateway package contains forbidden release files"
+            exit 1
+          fi
 
           # Package skill only (docs for AI agent use)
           mkdir -p /tmp/skill-pkg

@@ -39,8 +39,8 @@
 | 通用图 | 默认链 / `kolors` | `1024x1024` | 最稳 |
 | 竖屏海报 | `kolors` | `960x1280` 或 `768x1024` | Kolors 官方固定尺寸 |
 | 手机竖屏 | `kolors` | `720x1280` | 9:16 |
-| 中文海报 / 带字图 | `qwen` | 当前默认 | ModelScope Provider 当前不强传尺寸 |
-| 写实人像 | `z-turbo` | 当前默认 | ModelScope Provider 当前不强传尺寸 |
+| 中文海报 / 带字图 | `qwen` | 由 ModelScope 决定 | ModelScope Provider 当前不强传尺寸 |
+| 写实人像 | `z-turbo` | 由 ModelScope 决定 | ModelScope Provider 当前不强传尺寸 |
 | Agnes 普通图 | `agnes-2.1` | `1024x1024` 或 `1024x768` | 效果和速度更稳 |
 | Agnes 高清图 | `agnes-2.1` | `2048x1536` | 项目实测可用，生成更慢 |
 | Agnes 方形超大图 | `agnes-2.1` | 不建议 `2048x2048` | 实测容易超时 |

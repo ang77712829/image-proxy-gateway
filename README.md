@@ -1,5 +1,7 @@
 # AngeMedia Gateway
 
+[English](README.md) | [简体中文](README_CN.md)
+
 > OpenAI-compatible image and video generation gateway for AI Agents, NAS, New-API, and self-hosted workflows.
 
 AngeMedia is the media-generation sibling of AngeVoice. It focuses on images, video, model routing, prompt enhancement, and stable local media delivery.
@@ -81,7 +83,12 @@ Optional:
 ```env
 AGNES_API_KEY=
 OPENAI_IMAGE_API_KEY=
+OPENAI_IMAGE_BASE_URL=https://api.openai.com/v1
+OPENAI_IMAGE_MODEL=gpt-image-2
 GATEWAY_API_KEY=
+ANGE_LLM_API_KEY=
+ANGE_LLM_BASE_URL=https://api.openai.com/v1
+ANGE_LLM_MODEL=gpt-4o-mini
 ```
 
 For full Chinese setup instructions, see `README_CN.md`.
@@ -178,10 +185,10 @@ ANGE_ASSISTANT_CONFIRM_PLAN=false
 
 ## Modular backend layout
 
-The legacy entry remains:
+The compatibility entry remains:
 
 ```text
-scripts/image-gateway/gateway.py
+scripts/proxy.py
 ```
 
 The real backend implementation now lives in:
@@ -190,7 +197,7 @@ The real backend implementation now lives in:
 scripts/angemedia_gateway/
 ```
 
-This splits configuration, configuration metadata, SQLite state, schemas, media localization, routing, assistant logic, providers, and FastAPI route assembly. `server.py` now only assembles the app; page, admin, media, and storage routes live under `scripts/angemedia_gateway/routes/`.
+This splits configuration, configuration metadata, SQLite state, schemas, media localization, routing, assistant logic, providers, and FastAPI route assembly. `server.py` only assembles the app; page, admin, media, and storage routes live under `scripts/angemedia_gateway/routes/`.
 
 
 ## Standalone Agent Skill package

@@ -2,18 +2,20 @@
 
 ## 为什么要拆出来
 
-图片生成是这个网关的主线。视频生成参数多、耗时长、异步轮询复杂，如果直接堆进 `gateway.py`，主文件会越来越臃肿，也会影响 Agent 读取 Skill 时的清晰度。
+图片生成是这个网关的主线。视频生成参数多、耗时长、异步轮询复杂，如果直接堆进应用装配入口，主流程会越来越臃肿，也会影响 Agent 读取 Skill 时的清晰度。
 
 所以 v0.1.0 开始采用以下边界：
 
-- `gateway.py`：保留AngeMedia 网关主流程和 HTTP 路由入口。
+- `scripts/proxy.py`：只作为兼容启动入口。
+- `server.py`：只负责 FastAPI 应用装配。
+- `routes/media.py`：保留图片/视频 HTTP 路由入口。
 - `adapters/agnes_video.py`：只负责 Agnes 视频请求结构、payload 构造、提交任务、轮询任务和返回标准化。
 - `docs/AGNES_MODEL_CALL_EXAMPLES.md`：放详细调用示例。
 - `SKILL.md`：只做简短索引，不展开视频细节。
 
 ## 后续新增视频渠道的规则
 
-新增视频渠道时，不要直接把代码写进 `gateway.py`。推荐创建：
+新增视频渠道时，不要直接把代码写进 `server.py` 或路由函数。推荐创建：
 
 ```text
 adapters/<provider>_video.py

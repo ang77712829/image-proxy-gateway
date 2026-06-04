@@ -1,5 +1,7 @@
 # AngeMedia Gateway：给 Agent 接上图片与视频生成能力
 
+[English](README.md) | [简体中文](README_CN.md)
+
 > 当前版本：v0.1.0。面向 AI Agent、NAS、New-API 和自托管工作流的本地图片/视频生成网关。默认内置硅基流动、魔搭、Pollinations 三个图片渠道，对外提供兼容 OpenAI Images 的统一接口，并提供 Agnes 视频任务入口。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -405,18 +407,14 @@ curl http://localhost:9890/health
 
 ---
 
-## 扩展新渠道
+## 配置中心与自定义渠道
 
-当前代码已经是 Provider Registry 架构。新增渠道时，不要在主流程里堆 `if/else`，应该新增一个 provider adapter，然后注册模型别名。
+管理后台的“配置中心”已经支持内置渠道开关、密钥脱敏、自定义渠道新增/删除/排序和连通性测试。普通部署不需要改代码即可接入多个 OpenAI-compatible 图片渠道。
 
-预留方向：
-
-- 即梦；
-- 兼容 OpenAI 的 GPT 图片模型；
-- 自建 ComfyUI；
-- 其他第三方图片服务。
-
-开发说明见 `DEVELOPMENT.md`。
+- 内置渠道：硅基流动、魔搭、Pollinations、OpenAI-compatible 图片、Agnes 图片、Agnes 视频。
+- 自定义渠道：可新增多个渠道，分别设置名称、接口地址、默认模型、排序、启用状态和状态/额度查询地址。
+- 模型选择：小助手 LLM 可从后台拉取模型列表并测试连通性；生成渠道会在历史和文件管理中记录 provider、model 和耗时。
+- 发布建议：公网部署必须配置 `GATEWAY_API_KEY`、后台强密码，并放在 HTTPS 反向代理后。
 
 ---
 
@@ -575,10 +573,10 @@ Studio 入口：
 
 ## 模块化后端结构
 
-旧入口仍然保留：
+兼容启动入口仍然保留：
 
 ```text
-scripts/image-gateway/gateway.py
+scripts/proxy.py
 ```
 
 真实实现已经迁移到：
@@ -587,7 +585,7 @@ scripts/image-gateway/gateway.py
 scripts/angemedia_gateway/
 ```
 
-现在配置、配置元数据、SQLite 状态库、请求模型、媒体本地化、模型路由、Ange 小助手、Provider、FastAPI 路由装配都分开维护。`server.py` 只负责应用装配；页面、管理、媒体、文件/历史路由放在 `scripts/angemedia_gateway/routes/`。后续新增能力不要再堆回旧入口。
+现在配置、配置元数据、SQLite 状态库、请求模型、媒体本地化、模型路由、Ange 小助手、Provider、FastAPI 路由装配都分开维护。`server.py` 只负责应用装配；页面、管理、媒体、文件/历史路由放在 `scripts/angemedia_gateway/routes/`。后续新增能力应该放进对应模块，不要堆回启动入口。
 
 
 ---
