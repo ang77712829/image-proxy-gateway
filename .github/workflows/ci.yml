@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m py_compile scripts/proxy.py
+          python -m py_compile scripts/angemedia_gateway/server.py
+          python -m py_compile scripts/angemedia_gateway/config.py
+          python -m py_compile scripts/angemedia_gateway/state.py
+          python -m py_compile scripts/angemedia_gateway/security.py
+          python -m py_compile scripts/angemedia_gateway/routing.py
+          python -m py_compile scripts/angemedia_gateway/schemas.py
+          python -m py_compile scripts/angemedia_gateway/runtime.py
+          python -m py_compile scripts/angemedia_gateway/media.py
+          python -m py_compile scripts/angemedia_gateway/assistant.py
+          python -m py_compile scripts/angemedia_gateway/config_metadata.py
+          for f in scripts/angemedia_gateway/routes/*.py; do python -m py_compile "$f"; done
+          for f in scripts/angemedia_gateway/providers/*.py; do python -m py_compile "$f"; done
+          for f in scripts/angemedia_gateway/adapters/*.py; do python -m py_compile "$f"; done
+          echo "All syntax checks passed"
+
+      - name: Import test
+        run: |
+          cd scripts
+          python -c "
+          from angemedia_gateway import config, security, routing, schemas
+          from angemedia_gateway.routes import admin, media, pages, storage
+          from angemedia_gateway.providers import image, custom, base
+          print('All imports OK')
+          "
