@@ -14,6 +14,7 @@ AngeMedia Gateway v0.2.0。
 
 ## 最近关键提交
 
+- `91420f1 docs: sync agent handoff state`
 - `7d6505b docs: add agent handoff logs`
 - `f760e47 refactor: move provider list read to admin service`
 - `8d101b3 refactor: move assistant admin logic to service`
@@ -42,8 +43,9 @@ AngeMedia Gateway v0.2.0。
 ## 当前后端结构拆分状态
 
 - `routes/media.py` 已抽离媒体生成编排到 `services/media_service.py`。
-- `routes/admin.py` 已抽离大部分 read/write/provider/assistant admin 编排到 `services/admin_service.py`。
+- ✅ **Phase 1.2B 已收尾**：`routes/admin.py` 已抽离大部分 read/write/provider/assistant admin 编排到 `services/admin_service.py`。
 - `routes/admin.py` 仍保留 FastAPI route、认证依赖、Cookie/Header/Request/Response 处理、HTTPException 映射、login/logout/session/password 等高风险认证路径。
+- **Phase 1.2B 收尾结论**：适合迁移的 12 个 endpoint 已完成迁移（63%），剩余 5 个认证/会话层 endpoint 不适合迁移，1 个 config-metadata 无需迁移。
 
 ## 当前测试基线
 

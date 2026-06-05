@@ -126,3 +126,73 @@
   - 下一个可能的迁移点：`routes/admin.py` 中其他边界清晰的 route wrapper。
 - 是否停止等待验收：
   - 是
+
+## Phase 1.2B-7: routes/admin.py 只读收尾评估
+
+- 日期：2026-06-05
+- 执行 Agent：CC + mimo-v2.5-pro
+- 任务目标：
+  - 评估 Phase 1.2B 后端 admin route/service 拆分是否应该收尾
+  - 判断剩余 endpoint 是否还有低风险、边界清晰的迁移机会
+  - 判断哪些内容必须继续留在 route 层
+  - 给出下一步建议
+- 修改文件：
+  - 无
+- 行为是否改变：否，只读评估。
+- 测试命令：
+  - `git status --short --branch`
+  - `git diff --check`
+  - `rg "@router" scripts/angemedia_gateway/routes/admin.py`
+  - `rg "def |async def " scripts/angemedia_gateway/routes/admin.py`
+  - `rg "class AdminService|def |async def " scripts/angemedia_gateway/services/admin_service.py`
+- 测试结果：
+  - 工作区干净，main ahead 13
+  - git diff --check 通过
+  - endpoint 盘点完成
+- 提交 hash：
+  - 无（只读评估）
+- 风险备注：
+  - **评估结论：Phase 1.2B 建议收尾**
+  - **已迁移 12 个 endpoint（63%）**：config CRUD、provider CRUD/测试、assistant 管理
+  - **剩余 5 个不迁移**：login/logout/me/session/password（认证/会话/HTTP 层）
+  - **1 个无需迁移**：config-metadata（一行透传，无业务逻辑）
+  - **AdminService 结构健康**：15 个方法，无上帝类特征，未变胖
+  - **测试覆盖充足**：21 个用例通过，可覆盖当前 admin 迁移回归
+  - **不建议继续迁移认证层**：违反 FastAPI 架构最佳实践，风险高、收益低
+- 下一步建议：
+  - ✅ 收尾 Phase 1.2B
+  - 进入下一 Phase 规划，而不是继续拆认证路径
+  - 可考虑：Phase 2 规划、Provider 管理增强、前端界面、或其他功能开发
+- 是否停止等待验收：
+  - 是
+
+## Phase 1.2B-Close: 更新 handoff 文档标记收尾
+
+- 日期：2026-06-05
+- 执行 Agent：CC + mimo-v2.5-pro
+- 任务目标：
+  - 在开发期交接文档中记录 Phase 1.2B 已完成/建议收尾
+  - 记录 Phase 1.2B-7 只读评估结果
+  - 更新 NEXT_TASK.md，把下一步从"继续 admin route 拆分"改为"规划下一个 Phase"
+  - 不修改任何生产代码、tests、README、SKILL、发布文档
+- 修改文件：
+  - `docs/dev-handoff/CURRENT_STATE.md`
+  - `docs/dev-handoff/PHASE_LOG.md`
+  - `docs/dev-handoff/NEXT_TASK.md`
+- 行为是否改变：否，仅更新交接文档。
+- 测试命令：
+  - `git status --short --branch`
+  - `git diff --check`
+- 测试结果：
+  - 工作区干净，main ahead 13
+  - git diff --check 通过
+- 提交 hash：
+  - 未提交，等待验收
+- 风险备注：
+  - 无风险，仅文档更新。
+  - 不涉及生产代码或测试。
+- 下一步建议：
+  - 进入下一 Phase 规划
+  - 评估完成后，用户决定下一个主要开发方向
+- 是否停止等待验收：
+  - 是

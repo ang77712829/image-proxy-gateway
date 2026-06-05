@@ -4,12 +4,22 @@
 
 ## 当前推荐下一步
 
-先由 mimo/CC 执行低中风险后续小任务，但每轮必须更新：
+**Phase 1.2B 已收尾**，下一步进入 **Phase 2 规划或其他功能开发**。
+
+每轮必须更新：
 
 - `docs/dev-handoff/PHASE_LOG.md`
 - `docs/dev-handoff/NEXT_TASK.md`
 
-建议下一步仍保持 Phase 1 后端结构拆分方向，以只读评估或小范围 wrapper 迁移为主。不要自动开始下一步代码修改，必须等待用户明确批准。
+不要自动开始下一步代码修改，必须等待用户明确批准。
+
+## Phase 1.2B 收尾结论
+
+- ✅ 已完成 12 个 admin endpoint 的 service 迁移（63%）
+- ❌ 剩余 5 个认证/会话层 endpoint 不适合迁移（login/logout/me/session/password）
+- ⚠️ 1 个 config-metadata 无需迁移（一行透传）
+- ✅ `AdminService` 结构健康，未变胖
+- ✅ 测试覆盖充足（21 个用例通过）
 
 ## 下一位 Agent 接手前必须做
 
@@ -43,10 +53,11 @@ git status --short --branch
 - Codex 更适合高风险/复杂任务。
 - CC + mimo 更适合低中风险小任务。
 - 当前测试保护重点在 `tests/test_admin_api.py`。
-- 后续如果继续拆 `routes/admin.py`，应优先选择边界清晰、低风险、已有测试覆盖的 route wrapper。
+- Phase 1.2B 已收尾，不应继续拆分认证层。
 
 ## 最近关键提交
 
+- `91420f1 docs: sync agent handoff state`
 - `7d6505b docs: add agent handoff logs`
 - `f760e47 refactor: move provider list read to admin service`
 - `8d101b3 refactor: move assistant admin logic to service`
