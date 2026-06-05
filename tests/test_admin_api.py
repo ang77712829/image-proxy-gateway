@@ -280,6 +280,7 @@ class AdminApiWriteTest(unittest.TestCase):
         self.assertIn(provider_id, indexed)
         self.assertNotEqual(indexed[provider_id]["api_key"], secret)
         self.assertIn("*", indexed[provider_id]["api_key"])
+        self.assertNotIn(secret, providers.text)
 
         disabled = self.client.post(f"/v1/admin/providers/{provider_id}/enabled", json={"enabled": False})
         self.assertEqual(disabled.status_code, 200, disabled.text)

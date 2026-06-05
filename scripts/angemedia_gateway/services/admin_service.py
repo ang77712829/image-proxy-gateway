@@ -253,6 +253,9 @@ class AdminService:
     def provider_templates(self) -> list[dict[str, Any]]:
         return PROVIDER_TEMPLATES
 
+    def custom_providers(self) -> list[dict[str, Any]]:
+        return list_custom_providers(include_secret=False)
+
     def admin_config(self) -> dict[str, Any]:
         return {
             "settings": config_snapshot(mask=True),

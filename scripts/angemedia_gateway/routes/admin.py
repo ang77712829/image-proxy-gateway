@@ -24,7 +24,6 @@ from ..state import (
     delete_admin_session,
     get_admin_login_lock,
     get_admin_session,
-    list_custom_providers,
     record_admin_login_failure,
     verify_admin_login,
 )
@@ -130,7 +129,7 @@ async def create_gateway_key(save: bool = Body(True, embed=True)) -> dict[str, A
 
 @router.get("/v1/admin/providers", dependencies=[Depends(require_admin_auth)])
 async def get_custom_providers() -> dict[str, Any]:
-    return {"data": list_custom_providers(include_secret=False)}
+    return {"data": admin_service.custom_providers()}
 
 
 @router.get("/v1/admin/provider-templates", dependencies=[Depends(require_admin_auth)])
