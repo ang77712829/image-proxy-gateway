@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 
+from .. import config as C
 from ..media import localize_image_result, localize_video_result, maybe_to_b64
 from ..providers.base import BackendUnavailable, RateLimited
 from ..providers.custom import generate_custom_openai_image
@@ -16,6 +19,7 @@ from ..state import (
     get_custom_provider,
     now_iso,
     record_generation,
+    save_asset,
     upsert_video_task,
 )
 from ..runtime import PROVIDERS, agnes_video
@@ -41,6 +45,73 @@ class ImageProvidersFailed(RuntimeError):
 
 class VideoProviderDisabled(RuntimeError):
     """Video provider is disabled in current runtime config."""
+
+
+def _generated_local_paths(result: dict[str, Any], media_type: str) -> list[str]:
+    if media_type == "video":
+        local_path = str(result.get("local_path") or "")
+        return [local_path] if local_path else []
+    data = result.get("data")
+    if not isinstance(data, list):
+        return []
+    paths: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        local_path = str(item.get("local_path") or "")
+        if local_path:
+            paths.append(local_path)
+    return paths
+
+
+def _generated_output_file(local_path: str) -> Path | None:
+    if not local_path:
+        return None
+    path = Path(local_path)
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(C.OUTPUT_DIR.resolve())
+    except (OSError, ValueError):
+        return None
+    return resolved
+
+
+def _generated_output_files(result: dict[str, Any], media_type: str) -> list[Path]:
+    files: list[Path] = []
+    for local_path in _generated_local_paths(result, media_type):
+        path = _generated_output_file(local_path)
+        if path is not None:
+            files.append(path)
+    return files
+
+
+def _save_generated_asset(
+    *,
+    media_type: str,
+    result: dict[str, Any],
+    prompt: str,
+    model: str | None,
+    provider: str | None,
+    duration_ms: int,
+) -> None:
+    for path in _generated_output_files(result, media_type):
+        filename = path.name
+        save_asset(
+            id=uuid.uuid4().hex,
+            filename=filename,
+            storage_area="output",
+            relative_path=filename,
+            url_path=f"/generated/{filename}",
+            media_type=media_type,
+            source="generated",
+            size=path.stat().st_size,
+            prompt=prompt,
+            model=model,
+            provider=provider,
+            duration_ms=duration_ms,
+        )
 
 
 class MediaService:
@@ -79,6 +150,14 @@ class MediaService:
             input_mode="custom_provider",
             duration_ms=duration_ms,
             started_at=started_at,
+        )
+        _save_generated_asset(
+            media_type="image",
+            result=result,
+            prompt=req.prompt,
+            model=f"custom:{provider_id}",
+            provider=f"custom:{provider_id}",
+            duration_ms=duration_ms,
         )
         result["history_id"] = record_id
         return result
@@ -123,6 +202,14 @@ class MediaService:
                     input_mode="default_chain" if not req.model else "explicit_model",
                     duration_ms=duration_ms,
                     started_at=started_at,
+                )
+                _save_generated_asset(
+                    media_type="image",
+                    result=result,
+                    prompt=req.prompt,
+                    model=model,
+                    provider=backend,
+                    duration_ms=duration_ms,
                 )
                 result["history_id"] = record_id
                 log.info("%s succeeded: model=%s", backend, model)
@@ -179,6 +266,14 @@ class MediaService:
             input_mode=req.mode or ("image" if req.image or req.images else "text"),
             duration_ms=duration_ms,
             started_at=started_at,
+        )
+        _save_generated_asset(
+            media_type="video",
+            result=result,
+            prompt=req.prompt,
+            model=req.model,
+            provider="agnes_video",
+            duration_ms=duration_ms,
         )
         result["history_id"] = record_id
         return result
