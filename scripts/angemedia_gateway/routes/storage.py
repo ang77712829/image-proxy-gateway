@@ -23,6 +23,7 @@ from ..state import (
     list_rows,
     now_iso,
     safe_unlink_under,
+    save_asset,
     save_upload,
 )
 
@@ -152,6 +153,8 @@ async def upload_media(
     if len(files) > C.UPLOAD_MAX_FILES:
         raise HTTPException(status_code=413, detail=f"一次最多上传 {C.UPLOAD_MAX_FILES} 个文件")
     role_list = [part.strip() for part in (roles or "").split(",") if part.strip()]
+    image_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+    video_suffixes = {".mp4", ".webm", ".mov"}
     saved: list[dict[str, Any]] = []
     for index, file in enumerate(files):
         suffix = Path(file.filename or "").suffix.lower()
@@ -172,6 +175,24 @@ async def upload_media(
             "created_at": now_iso(),
         }
         save_upload(row)
+        # 写入 assets 表（仅 image/video 类型）
+        if suffix in image_suffixes:
+            media_type = "image"
+        elif suffix in video_suffixes:
+            media_type = "video"
+        else:
+            media_type = None
+        if media_type is not None:
+            save_asset(
+                id=uuid.uuid4().hex,
+                filename=filename,
+                storage_area="upload",
+                relative_path=filename,
+                url_path=f"/uploads/{filename}",
+                media_type=media_type,
+                source="upload",
+                size=path.stat().st_size,
+            )
         saved.append(row)
     return {"data": saved}
 
