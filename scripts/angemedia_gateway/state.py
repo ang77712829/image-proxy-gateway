@@ -171,6 +171,22 @@ def init_db() -> None:
                 locked_until REAL NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS assets (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                storage_area TEXT NOT NULL CHECK(storage_area IN ('output', 'upload')),
+                relative_path TEXT NOT NULL,
+                url_path TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK(media_type IN ('image', 'video')),
+                source TEXT NOT NULL CHECK(source IN ('generated', 'upload')),
+                size INTEGER NOT NULL DEFAULT 0,
+                prompt TEXT,
+                model TEXT,
+                provider TEXT,
+                duration_ms INTEGER,
+                created_at TEXT NOT NULL,
+                UNIQUE(storage_area, relative_path)
+            );
             """
         )
         ensure_columns(conn)
