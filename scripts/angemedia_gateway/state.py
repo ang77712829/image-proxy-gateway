@@ -207,6 +207,24 @@ def init_db() -> None:
                 last_used_ip TEXT,
                 revoked_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK(kind IN ('image', 'video')),
+                status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'canceled')),
+                provider TEXT,
+                model TEXT,
+                prompt TEXT,
+                input_json TEXT,
+                output_json TEXT,
+                error_code TEXT,
+                error_message TEXT,
+                external_task_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                duration_ms INTEGER
+            );
             """
         )
         conn.execute(
@@ -216,6 +234,10 @@ def init_db() -> None:
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
             ("gateway_api_keys_v1", now_iso()),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
+            ("jobs_v1", now_iso()),
         )
         ensure_columns(conn)
 
