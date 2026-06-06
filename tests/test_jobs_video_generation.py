@@ -369,6 +369,276 @@ class VideoJobSyncPathTest(_VideoJobTestBase):
         self.assertIn("task_id", result)
 
 
+# ── 18-28. poll 路径更新 job ───────────────────────────
+
+class VideoJobPollTest(_VideoJobTestBase):
+    """GET /v1/videos/{task_id} poll 更新 job。"""
+
+    def _create_video_job(self, external_task_id: str = "poll-task-001") -> str:
+        """辅助：创建一个 running video job 并返回 job_id。"""
+        from angemedia_gateway.state import create_job
+        job = create_job(
+            kind="video", status="running", provider="agnes_video",
+            model="agnes-video-v2.0", prompt="test",
+            external_task_id=external_task_id,
+        )
+        return job["id"]
+
+    def test_poll_completed_updates_job_to_succeeded(self) -> None:
+        """poll completed 后 job status 变为 succeeded。"""
+        job_id = self._create_video_job("poll-task-001")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-001",
+            "status": "completed",
+            "video_url": "http://example.com/video.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-001"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        self.assertEqual(job["status"], "succeeded")
+
+    def test_poll_completed_response_includes_job_id(self) -> None:
+        """completed 后 response 包含 job_id。"""
+        self._create_video_job("poll-task-002")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-002",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("poll-task-002"))
+        self.assertIn("job_id", result)
+
+    def test_succeeded_job_output_json_has_summary(self) -> None:
+        """succeeded job 的 output_json 包含 task_id/status/has_video_url 摘要。"""
+        job_id = self._create_video_job("poll-task-003")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-003",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-003"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        output = json.loads(job["output_json"])
+        self.assertEqual(output["task_id"], "poll-task-003")
+        self.assertEqual(output["status"], "completed")
+        self.assertTrue(output["has_video_url"])
+        self.assertEqual(output["video_url"], "http://example.com/v.mp4")
+
+    def test_output_json_no_secret(self) -> None:
+        """output_json 不包含 secret / Authorization / API key。"""
+        job_id = self._create_video_job("poll-task-004")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-004",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-004"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        output_str = job["output_json"]
+        self.assertNotIn("Bearer", output_str)
+        self.assertNotIn("AGNES_API_KEY", output_str)
+
+    def test_poll_failed_updates_job_to_failed(self) -> None:
+        """poll failed 后 job status 变为 failed。"""
+        job_id = self._create_video_job("poll-task-005")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-005",
+            "status": "failed",
+            "error": "generation failed",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-005"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["error_code"], "video_generation_failed")
+
+    def test_failed_job_error_message_redacted(self) -> None:
+        """failed job 的 error_message 已脱敏。"""
+        job_id = self._create_video_job("poll-task-006")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-006",
+            "status": "error",
+            "error": "Bearer am-secret-token rejected",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-006"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        self.assertNotIn("am-secret-token", job["error_message"])
+
+    def test_poll_running_keeps_job_running(self) -> None:
+        """poll running/submitted 时 job 保持 running。"""
+        job_id = self._create_video_job("poll-task-007")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-007",
+            "status": "running",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-task-007"))
+        from angemedia_gateway.state import get_job
+        job = get_job(job_id)
+        self.assertEqual(job["status"], "running")
+
+    def test_no_matching_job_poll_unchanged(self) -> None:
+        """找不到对应 job 时，poll 行为保持原样，response 不包含 job_id。"""
+        mock_poll = AsyncMock(return_value={
+            "task_id": "no-match-task",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("no-match-task"))
+        self.assertNotIn("job_id", result)
+        self.assertIn("task_id", result)
+
+    def test_job_update_failure_does_not_block_poll(self) -> None:
+        """update_job_status 抛异常时，poll response 不被阻断。"""
+        self._create_video_job("poll-task-008")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-008",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.update_job_status", side_effect=RuntimeError("DB failure")):
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("poll-task-008"))
+        # response 仍然正常，包含 job_id（因为 job 找到了，只是更新失败）
+        self.assertIn("job_id", result)
+        self.assertIn("task_id", result)
+
+    def test_video_tasks_upsert_still_works(self) -> None:
+        """existing video_tasks upsert 行为仍正常。"""
+        mock_poll = AsyncMock(return_value={
+            "task_id": "vt-poll-001",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("vt-poll-001"))
+        conn = self._conn()
+        try:
+            row = conn.execute("SELECT status FROM video_tasks WHERE task_id = 'vt-poll-001'").fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["status"], "completed")
+        finally:
+            conn.close()
+
+    def test_poll_response_preserves原有字段(self) -> None:
+        """GET /v1/videos/{task_id} 原有字段仍保留。"""
+        self._create_video_job("poll-task-010")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-task-010",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+            "some_extra": "value",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("poll-task-010"))
+        self.assertEqual(result["task_id"], "poll-task-010")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["video_url"], "http://example.com/v.mp4")
+        self.assertEqual(result["some_extra"], "value")
+
+
+# ── 29-32. kind 限定匹配 ──────────────────────────────
+
+class VideoJobKindFilterTest(_VideoJobTestBase):
+    """poll 只匹配 kind=video 的 job，不误匹配 image job。"""
+
+    def _create_job(self, kind: str, external_task_id: str) -> str:
+        from angemedia_gateway.state import create_job
+        job = create_job(kind=kind, status="running", external_task_id=external_task_id, prompt="test")
+        return job["id"]
+
+    def test_image_job_with_same_task_id_not_matched(self) -> None:
+        """存在 kind=image 且 external_task_id 相同的 job 时，video poll 不匹配它。"""
+        image_job_id = self._create_job("image", "shared-task-001")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "shared-task-001",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("shared-task-001"))
+        # image job 不应被匹配
+        from angemedia_gateway.state import get_job
+        image_job = get_job(image_job_id)
+        self.assertEqual(image_job["status"], "running")
+        # response 不应包含 image job 的 id
+        self.assertNotIn("job_id", result)
+
+    def test_both_jobs_match_video_job(self) -> None:
+        """同时存在 image 和 video job 时，匹配 video job。"""
+        image_job_id = self._create_job("image", "dual-task-001")
+        video_job_id = self._create_job("video", "dual-task-001")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "dual-task-001",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("dual-task-001"))
+        from angemedia_gateway.state import get_job
+        # video job 更新为 succeeded
+        video_job = get_job(video_job_id)
+        self.assertEqual(video_job["status"], "succeeded")
+        # image job 保持 running
+        image_job = get_job(image_job_id)
+        self.assertEqual(image_job["status"], "running")
+        # response 返回 video job 的 id
+        self.assertEqual(result["job_id"], video_job_id)
+
+    def test_poll_completed_only_updates_video_job(self) -> None:
+        """poll completed 后，只更新 video job，不更新 image job。"""
+        image_job_id = self._create_job("image", "only-video-001")
+        video_job_id = self._create_job("video", "only-video-001")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "only-video-001",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("only-video-001"))
+        from angemedia_gateway.state import get_job
+        self.assertEqual(get_job(video_job_id)["status"], "succeeded")
+        self.assertEqual(get_job(image_job_id)["status"], "running")
+
+    def test_response_job_id_is_video_job(self) -> None:
+        """response 返回的 job_id 应该是 video job 的 id。"""
+        self._create_job("image", "verify-video-id-001")
+        video_job_id = self._create_job("video", "verify-video-id-001")
+        mock_poll = AsyncMock(return_value={
+            "task_id": "verify-video-id-001",
+            "status": "completed",
+            "video_url": "http://example.com/v.mp4",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("verify-video-id-001"))
+        self.assertEqual(result["job_id"], video_job_id)
+
+
 def await_compat(coro):
     """兼容同步测试调用异步方法。"""
     import asyncio

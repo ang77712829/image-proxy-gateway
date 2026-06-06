@@ -1103,6 +1103,23 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     return dict(row)
 
 
+def get_job_by_external_task_id(external_task_id: str, *, kind: str | None = None) -> dict[str, Any] | None:
+    """按 external_task_id 查询最新 job，可选 kind 限定。不存在返回 None。"""
+    if not external_task_id:
+        return None
+    if kind:
+        sql = f"SELECT {_JOB_COLUMNS} FROM jobs WHERE external_task_id = ? AND kind = ? ORDER BY created_at DESC LIMIT 1"
+        params = (external_task_id, kind)
+    else:
+        sql = f"SELECT {_JOB_COLUMNS} FROM jobs WHERE external_task_id = ? ORDER BY created_at DESC LIMIT 1"
+        params = (external_task_id,)
+    with closing(db_connect()) as conn:
+        row = conn.execute(sql, params).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
 def list_jobs(
     *,
     kind: str | None = None,

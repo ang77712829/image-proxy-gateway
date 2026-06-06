@@ -18,6 +18,7 @@ from ..state import (
     builtin_provider_enabled,
     create_job,
     get_custom_provider,
+    get_job_by_external_task_id,
     now_iso,
     record_generation,
     safe_json,
@@ -425,4 +426,47 @@ class MediaService:
             result,
             duration_ms=int(result.get("duration_ms") or 0),
         )
+
+        # ── poll 后更新 job（旁路，不阻断主流程）────────
+        poll_status = str(result.get("status") or "").lower()
+        job_id: str | None = None
+        try:
+            job = get_job_by_external_task_id(safe_task_id, kind="video")
+        except Exception:
+            job = None
+            log.warning("查询 video job 失败: task_id=%s", safe_task_id)
+        if job:
+            job_id = job["id"]
+            if poll_status in {"completed", "succeeded", "done"}:
+                output_summary = safe_json({
+                    "provider": result.get("provider", "agnes_video"),
+                    "model": result.get("model", ""),
+                    "task_id": safe_task_id,
+                    "status": poll_status,
+                    "has_video_url": bool(result.get("video_url")),
+                    "video_url": result.get("video_url", ""),
+                })
+                try:
+                    update_job_status(
+                        job_id, status="succeeded",
+                        output_json=output_summary,
+                        completed_at=now_iso(),
+                    )
+                except Exception:
+                    log.warning("更新 video job succeeded 状态失败: job_id=%s", job_id)
+            elif poll_status in {"failed", "error", "cancelled", "canceled"}:
+                try:
+                    update_job_status(
+                        job_id, status="failed",
+                        error_code="video_generation_failed",
+                        error_message=redact_secret_text(str(result.get("error") or result.get("message") or poll_status))[:500],
+                        completed_at=now_iso(),
+                    )
+                except Exception:
+                    log.warning("更新 video job failed 状态失败: job_id=%s", job_id)
+            # queued/submitted/running/processing → 不更新，保持 running
+        # ── end job poll update ─────────────────────────
+
+        if job_id:
+            result["job_id"] = job_id
         return result
