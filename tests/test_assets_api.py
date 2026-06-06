@@ -183,3 +183,108 @@ class AssetsApiTest(unittest.TestCase):
         resp = self.client.delete("/v1/assets/api-030")
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertFalse(test_file.exists(), "物理文件应被删除")
+
+    # ── job_id 相关测试 ────────────────────────────────
+
+    def test_list_includes_job_id(self) -> None:
+        """GET /v1/assets list 返回的每个 asset 包含 job_id。"""
+        self.login_admin()
+        self._insert_test_asset("jid-list-001", job_id="job-a")
+        self._insert_test_asset("jid-list-002")
+        resp = self.client.get("/v1/assets")
+        self.assertEqual(resp.status_code, 200)
+        for item in resp.json()["data"]:
+            self.assertIn("job_id", item)
+
+    def test_list_job_id_null_appears_as_null(self) -> None:
+        """job_id=NULL 的 asset 在响应中表现为 null。"""
+        self.login_admin()
+        self._insert_test_asset("jid-null-001")
+        resp = self.client.get("/v1/assets")
+        items = resp.json()["data"]
+        jid_item = [i for i in items if i["id"] == "jid-null-001"][0]
+        self.assertIsNone(jid_item["job_id"])
+
+    def test_list_job_id_string_appears(self) -> None:
+        """job_id=xxx 的 asset 在响应中返回对应字符串。"""
+        self.login_admin()
+        self._insert_test_asset("jid-str-001", job_id="job-xyz")
+        resp = self.client.get("/v1/assets")
+        items = resp.json()["data"]
+        jid_item = [i for i in items if i["id"] == "jid-str-001"][0]
+        self.assertEqual(jid_item["job_id"], "job-xyz")
+
+    def test_detail_includes_job_id(self) -> None:
+        """GET /v1/assets/{asset_id} detail 返回 job_id。"""
+        self.login_admin()
+        self._insert_test_asset("jid-det-001", job_id="job-det")
+        resp = self.client.get("/v1/assets/jid-det-001")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"]["job_id"], "job-det")
+
+    def test_filter_by_job_id(self) -> None:
+        """GET /v1/assets?job_id=job-a 只返回 job-a 关联资产。"""
+        self.login_admin()
+        self._insert_test_asset("jid-filt-a1", job_id="job-a")
+        self._insert_test_asset("jid-filt-a2", job_id="job-a")
+        self._insert_test_asset("jid-filt-b1", job_id="job-b")
+        resp = self.client.get("/v1/assets?job_id=job-a")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()["data"]
+        self.assertEqual(len(items), 2)
+        for item in items:
+            self.assertEqual(item["job_id"], "job-a")
+
+    def test_no_job_id_returns_all(self) -> None:
+        """未传 job_id 时仍返回全部 assets。"""
+        self.login_admin()
+        self._insert_test_asset("jid-all-1", job_id="job-x")
+        self._insert_test_asset("jid-all-2")
+        resp = self.client.get("/v1/assets")
+        self.assertEqual(resp.status_code, 200)
+        items = resp.json()["data"]
+        self.assertGreaterEqual(len(items), 2)
+
+    def test_nonexistent_job_id_returns_empty(self) -> None:
+        """不存在的 job_id 返回空列表，不应 500。"""
+        self.login_admin()
+        self._insert_test_asset("jid-empty-001")
+        resp = self.client.get("/v1/assets?job_id=nonexistent-job-id")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"], [])
+
+    def test_upload_cannot_fake_job_id_via_query(self) -> None:
+        """upload API 不能通过 query 参数伪造 job_id。"""
+        self.login_admin()
+        resp = self.client.post(
+            "/v1/uploads?job_id=fake-job-id",
+            files={"files": ("upload-query-test.png", b"fake", "image/png")},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        # 用 upload 响应中的 filename 定位 asset
+        upload_filename = resp.json()["data"][0]["filename"]
+        with sqlite3.connect(str(self._db_path)) as conn:
+            row = conn.execute(
+                "SELECT job_id FROM assets WHERE storage_area = 'upload' AND relative_path = ?",
+                (upload_filename,),
+            ).fetchone()
+            self.assertIsNotNone(row, "upload asset 应已创建")
+            self.assertIsNone(row[0], "upload asset 的 job_id 不应被伪造")
+
+    def test_upload_cannot_fake_job_id_via_form(self) -> None:
+        """upload API 不能通过 form 字段伪造 job_id。"""
+        self.login_admin()
+        resp = self.client.post(
+            "/v1/uploads",
+            files={"files": ("upload-form-test.png", b"fake", "image/png")},
+            data={"job_id": "fake-job-id"},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        upload_filename = resp.json()["data"][0]["filename"]
+        with sqlite3.connect(str(self._db_path)) as conn:
+            row = conn.execute(
+                "SELECT job_id FROM assets WHERE storage_area = 'upload' AND relative_path = ?",
+                (upload_filename,),
+            ).fetchone()
+            self.assertIsNotNone(row, "upload asset 应已创建")
+            self.assertIsNone(row[0], "upload asset 的 job_id 不应被伪造")

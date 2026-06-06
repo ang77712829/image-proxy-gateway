@@ -201,8 +201,9 @@ async def upload_media(
 async def get_assets(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    job_id: Optional[str] = Query(None),
 ) -> dict[str, Any]:
-    return {"data": list_assets(limit=limit, offset=offset)}
+    return {"data": list_assets(limit=limit, offset=offset, job_id=job_id)}
 
 
 @router.get("/v1/assets/{asset_id}", dependencies=[Depends(require_admin_auth)])
