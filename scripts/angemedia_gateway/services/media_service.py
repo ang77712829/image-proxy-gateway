@@ -356,6 +356,36 @@ class MediaService:
         task_id = str(result.get("task_id") or result.get("id") or "")
         if task_id:
             upsert_video_task(task_id, req.prompt, req.model, status, result, duration_ms=duration_ms)
+
+        # ── job 记录（旁路，仅异步提交路径）───────────────
+        job_id: str | None = None
+        if task_id and not req.wait_for_completion:
+            input_summary: dict[str, Any] = {
+                "model": req.model,
+                "mode": req.mode,
+                "height": req.height,
+                "width": req.width,
+                "num_frames": req.num_frames,
+                "frame_rate": req.frame_rate,
+                "wait_for_completion": req.wait_for_completion,
+                "has_image": bool(req.image or req.images),
+                "image_count": len(req.images) if req.images else (1 if req.image else 0),
+            }
+            try:
+                job_id = create_job(
+                    kind="video",
+                    status="running",
+                    provider="agnes_video",
+                    model=req.model,
+                    prompt=req.prompt,
+                    external_task_id=task_id,
+                    input_json=safe_json(input_summary),
+                    started_at=started_at,
+                )["id"]
+            except Exception:
+                log.warning("创建 video job 失败（不影响生成）")
+        # ── end job ─────────────────────────────────────
+
         record_id = record_generation(
             media_type="video",
             prompt=req.prompt,
@@ -379,6 +409,8 @@ class MediaService:
             duration_ms=duration_ms,
         )
         result["history_id"] = record_id
+        if job_id:
+            result["job_id"] = job_id
         return result
 
     async def get_video(self, task_id: str) -> dict[str, Any]:
