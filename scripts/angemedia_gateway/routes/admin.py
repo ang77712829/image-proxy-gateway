@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Cookie, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
 
 from ..config_metadata import metadata_response, validate_config_settings
@@ -33,7 +33,7 @@ from ..state import (
     update_gateway_api_key,
     verify_admin_login,
 )
-from ..runtime import client_ip_from_request, gateway_key_matches, now_seconds, require_admin_auth
+from ..runtime import client_ip_from_request, now_seconds, require_admin_auth
 
 router = APIRouter()
 admin_service = AdminService()
@@ -83,12 +83,8 @@ async def admin_me(session: dict[str, Any] = Depends(require_admin_auth)) -> dic
 @router.get("/v1/admin/session")
 async def admin_session_status(
     am_admin_session: Optional[str] = Cookie(None),
-    authorization: Optional[str] = Header(None),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     """返回登录状态，不用 401 响应打扰前端控制台。"""
-    if gateway_key_matches(authorization, x_api_key):
-        return {"authenticated": True, "username": "gateway-key", "auth_type": "gateway_key"}
     session = get_admin_session(am_admin_session or "")
     if session is None:
         return {"authenticated": False}

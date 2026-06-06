@@ -984,6 +984,13 @@ def revoke_gateway_api_key(key_id: str) -> bool:
     return cursor.rowcount > 0
 
 
+def has_gateway_api_key_records() -> bool:
+    """判断是否曾创建过 Gateway API Key 记录。"""
+    with closing(db_connect()) as conn:
+        row = conn.execute("SELECT 1 FROM gateway_api_keys LIMIT 1").fetchone()
+    return row is not None
+
+
 def verify_gateway_api_key(input_key: str) -> dict[str, Any] | None:
     """验证 API Key：enabled=1 且未吊销。返回 key 记录（不含 key_hash）。"""
     if not input_key:

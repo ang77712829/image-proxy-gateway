@@ -1,6 +1,7 @@
 """网关运行时共享依赖。"""
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import time
@@ -17,7 +18,9 @@ from .state import (
     cleanup_admin_security_state,
     ensure_default_admin_user,
     get_admin_session,
+    has_gateway_api_key_records,
     init_db,
+    verify_gateway_api_key,
 )
 
 log = logging.getLogger("angemedia-gateway")
@@ -55,10 +58,47 @@ def refresh_runtime() -> None:
     agnes_video.base_url = C.AGNES_BASE_URL
 
 
-def gateway_key_matches(authorization: Optional[str], x_api_key: Optional[str]) -> bool:
-    if not C.GATEWAY_API_KEY:
+def _bearer_token(authorization: Optional[str]) -> str:
+    value = (authorization or "").strip()
+    if not value:
+        return ""
+    prefix = "Bearer "
+    if not value.startswith(prefix):
+        return ""
+    return value[len(prefix):].strip()
+
+
+def _request_gateway_token(authorization: Optional[str], x_api_key: Optional[str]) -> tuple[str, bool]:
+    bearer = _bearer_token(authorization)
+    api_key = (x_api_key or "").strip()
+    if bearer and api_key and bearer != api_key:
+        return "", True
+    return bearer or api_key, False
+
+
+def _legacy_gateway_key_matches(token: str) -> bool:
+    if not token or not C.GATEWAY_API_KEY:
         return False
-    return authorization == f"Bearer {C.GATEWAY_API_KEY}" or x_api_key == C.GATEWAY_API_KEY
+    return hmac.compare_digest(token, C.GATEWAY_API_KEY)
+
+
+def _gateway_auth_enabled() -> bool:
+    return bool(C.GATEWAY_API_KEY) or has_gateway_api_key_records()
+
+
+def _valid_gateway_key_token(token: str) -> bool:
+    if not token:
+        return False
+    if verify_gateway_api_key(token) is not None:
+        return True
+    return _legacy_gateway_key_matches(token)
+
+
+def gateway_key_matches(authorization: Optional[str], x_api_key: Optional[str]) -> bool:
+    token, conflict = _request_gateway_token(authorization, x_api_key)
+    if conflict:
+        return False
+    return _legacy_gateway_key_matches(token)
 
 
 async def require_auth(
@@ -67,11 +107,14 @@ async def require_auth(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> None:
     """校验普通 API 访问权限。"""
-    if gateway_key_matches(authorization, x_api_key):
+    token, conflict = _request_gateway_token(authorization, x_api_key)
+    if conflict:
+        raise HTTPException(status_code=401, detail="缺少或无效的网关访问密钥")
+    if token and _valid_gateway_key_token(token):
         return
     if get_admin_session(am_admin_session or "") is not None:
         return
-    if not C.GATEWAY_API_KEY:
+    if not _gateway_auth_enabled():
         return
     raise HTTPException(status_code=401, detail="缺少或无效的网关访问密钥")
 
@@ -82,12 +125,13 @@ async def require_admin_auth(
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> dict[str, Any]:
     """校验管理后台权限。"""
-    if gateway_key_matches(authorization, x_api_key):
-        return {"username": "gateway-key", "auth_type": "gateway_key"}
     session = get_admin_session(am_admin_session or "")
-    if session is None:
-        raise HTTPException(status_code=401, detail="需要登录管理后台")
-    return {"username": session["username"], "auth_type": "session"}
+    if session is not None:
+        return {"username": session["username"], "auth_type": "session"}
+    token, conflict = _request_gateway_token(authorization, x_api_key)
+    if conflict or _valid_gateway_key_token(token):
+        raise HTTPException(status_code=403, detail="网关访问密钥不能访问管理后台")
+    raise HTTPException(status_code=401, detail="需要登录管理后台")
 
 
 def uploaded_file_url(filename: str) -> str:
