@@ -527,3 +527,185 @@ class DeleteAssetTest(_AssetCrudTestBase):
                 delete_asset("del-005")
         # DB 记录应保留
         self.assertIsNotNone(self._read_asset("del-005"))
+
+
+# ── Phase 2.6-2: assets.job_id CRUD tests ─────────────
+
+class AssetJobIdTest(_AssetCrudTestBase):
+    """save_asset / get_asset / list_assets 的 job_id 支持。"""
+
+    def test_save_asset_with_job_id(self) -> None:
+        """save_asset(job_id=...) 可保存 job_id。"""
+        save_asset(
+            id="jid-001", filename="j.png", storage_area="output",
+            relative_path="jid.png", url_path="/generated/jid.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-abc",
+        )
+        asset = self._read_asset("jid-001")
+        self.assertEqual(asset["job_id"], "job-abc")
+
+    def test_save_asset_without_job_id_is_null(self) -> None:
+        """save_asset() 不传 job_id 时 job_id 为 NULL。"""
+        save_asset(
+            id="jid-002", filename="n.png", storage_area="output",
+            relative_path="null-jid.png", url_path="/generated/null-jid.png",
+            media_type="image", source="generated", size=100,
+        )
+        asset = self._read_asset("jid-002")
+        self.assertIsNone(asset["job_id"])
+
+    def test_get_asset_returns_dict_with_job_id(self) -> None:
+        """get_asset() 返回 dict 包含 job_id。"""
+        save_asset(
+            id="jid-003", filename="r.png", storage_area="output",
+            relative_path="ret-jid.png", url_path="/generated/ret-jid.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-xyz",
+        )
+        asset = get_asset("jid-003")
+        self.assertIsNotNone(asset)
+        self.assertIn("job_id", asset)
+        self.assertEqual(asset["job_id"], "job-xyz")
+
+    def test_list_assets_includes_job_id(self) -> None:
+        """list_assets() 返回项包含 job_id。"""
+        save_asset(
+            id="jid-004", filename="l.png", storage_area="output",
+            relative_path="list-jid.png", url_path="/generated/list-jid.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-list",
+        )
+        assets = list_assets()
+        self.assertEqual(len(assets), 1)
+        self.assertIn("job_id", assets[0])
+        self.assertEqual(assets[0]["job_id"], "job-list")
+
+    def test_list_assets_filter_by_job_id(self) -> None:
+        """list_assets(job_id=...) 只返回匹配 job_id 的 assets。"""
+        save_asset(
+            id="jid-005a", filename="a.png", storage_area="output",
+            relative_path="filter-a.png", url_path="/generated/filter-a.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-match",
+        )
+        save_asset(
+            id="jid-005b", filename="b.png", storage_area="output",
+            relative_path="filter-b.png", url_path="/generated/filter-b.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-other",
+        )
+        assets = list_assets(job_id="job-match")
+        self.assertEqual(len(assets), 1)
+        self.assertEqual(assets[0]["job_id"], "job-match")
+
+    def test_list_assets_filter_no_match(self) -> None:
+        """list_assets(job_id=...) 无匹配时返回空列表。"""
+        save_asset(
+            id="jid-006", filename="c.png", storage_area="output",
+            relative_path="no-match.png", url_path="/generated/no-match.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-x",
+        )
+        assets = list_assets(job_id="job-nonexistent")
+        self.assertEqual(assets, [])
+
+    def test_old_call_without_job_id_still_works(self) -> None:
+        """旧调用不传 job_id 仍成功。"""
+        save_asset(
+            id="jid-007", filename="old.png", storage_area="output",
+            relative_path="old-style.png", url_path="/generated/old-style.png",
+            media_type="image", source="generated", size=100,
+        )
+        asset = self._read_asset("jid-007")
+        self.assertIsNotNone(asset)
+        self.assertIsNone(asset["job_id"])
+
+    def test_same_path_same_job_id_idempotent(self) -> None:
+        """同一路径重复 save_asset(job_id=同一个值) 幂等。"""
+        save_asset(
+            id="jid-008a", filename="idem.png", storage_area="output",
+            relative_path="idem.png", url_path="/generated/idem.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-idem",
+        )
+        save_asset(
+            id="jid-008b", filename="idem2.png", storage_area="output",
+            relative_path="idem.png", url_path="/generated/idem.png",
+            media_type="image", source="generated", size=200,
+            job_id="job-idem",
+        )
+        asset = self._read_asset("jid-008a")
+        self.assertEqual(asset["job_id"], "job-idem")
+        self.assertEqual(asset["size"], 200)
+        self.assertIsNone(self._read_asset("jid-008b"))
+
+    def test_null_job_id_does_not_overwrite_existing(self) -> None:
+        """已有 asset job_id=old 时，save_asset(job_id=None) 不覆盖。"""
+        save_asset(
+            id="jid-009a", filename="keep.png", storage_area="output",
+            relative_path="keep-job.png", url_path="/generated/keep-job.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-keep",
+        )
+        # 再次保存但不传 job_id
+        save_asset(
+            id="jid-009b", filename="keep2.png", storage_area="output",
+            relative_path="keep-job.png", url_path="/generated/keep-job.png",
+            media_type="image", source="generated", size=200,
+        )
+        asset = self._read_asset("jid-009a")
+        self.assertEqual(asset["job_id"], "job-keep")
+        self.assertEqual(asset["size"], 200)
+
+    def test_non_null_job_id_can_fill_null(self) -> None:
+        """已有 asset job_id=NULL 时，save_asset(job_id=新值) 可以补写。"""
+        save_asset(
+            id="jid-010a", filename="fill.png", storage_area="output",
+            relative_path="fill-job.png", url_path="/generated/fill-job.png",
+            media_type="image", source="generated", size=100,
+        )
+        # 补写 job_id
+        save_asset(
+            id="jid-010b", filename="fill2.png", storage_area="output",
+            relative_path="fill-job.png", url_path="/generated/fill-job.png",
+            media_type="image", source="generated", size=200,
+            job_id="job-filled",
+        )
+        asset = self._read_asset("jid-010a")
+        self.assertEqual(asset["job_id"], "job-filled")
+        self.assertEqual(asset["size"], 200)
+
+    def test_different_job_id_does_not_overwrite_existing(self) -> None:
+        """已有 asset job_id=old 时，save_asset(job_id=new) 不覆盖 old。"""
+        save_asset(
+            id="jid-011a", filename="over.png", storage_area="output",
+            relative_path="over-job.png", url_path="/generated/over-job.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-old",
+        )
+        save_asset(
+            id="jid-011b", filename="over2.png", storage_area="output",
+            relative_path="over-job.png", url_path="/generated/over-job.png",
+            media_type="image", source="generated", size=200,
+            job_id="job-new",
+        )
+        asset = self._read_asset("jid-011a")
+        # job_id 不被覆盖，仍为 job-old
+        self.assertEqual(asset["job_id"], "job-old")
+        # metadata 如 size 仍按原有冲突逻辑更新
+        self.assertEqual(asset["size"], 200)
+        self.assertEqual(asset["filename"], "over2.png")
+        # 不新增重复行
+        self.assertIsNone(self._read_asset("jid-011b"))
+
+    def test_delete_asset_with_job_id_succeeds(self) -> None:
+        """delete_asset() 删除含 job_id 的 asset 不报错。"""
+        save_asset(
+            id="jid-012", filename="del-jid.png", storage_area="output",
+            relative_path="del-jid.png", url_path="/generated/del-jid.png",
+            media_type="image", source="generated", size=100,
+            job_id="job-del",
+        )
+        self.assertTrue(delete_asset("jid-012"))
+        self.assertIsNone(self._read_asset("jid-012"))

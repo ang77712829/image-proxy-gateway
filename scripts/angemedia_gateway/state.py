@@ -477,8 +477,15 @@ def save_asset(
     model: str | None = None,
     provider: str | None = None,
     duration_ms: int | None = None,
+    job_id: str | None = None,
 ) -> None:
-    """写入资产记录，(storage_area, relative_path) 冲突时更新 metadata，保留 created_at。"""
+    """写入资产记录，(storage_area, relative_path) 冲突时更新 metadata，保留 created_at。
+
+    job_id 冲突处理：
+    - 新 job_id 为 None → 不覆盖已有 job_id
+    - 已有 job_id 为 NULL 且新 job_id 非空 → 补写新 job_id
+    - 已有 job_id 非空 → 不覆盖已有 job_id
+    """
     now = now_iso()
     try:
         with closing(db_connect()) as conn:
@@ -487,8 +494,8 @@ def save_asset(
                 INSERT INTO assets(
                     id, filename, storage_area, relative_path, url_path,
                     media_type, source, size, prompt, model, provider,
-                    duration_ms, created_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    duration_ms, created_at, job_id
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(storage_area, relative_path) DO UPDATE SET
                     filename=excluded.filename,
                     url_path=excluded.url_path,
@@ -498,12 +505,13 @@ def save_asset(
                     prompt=excluded.prompt,
                     model=excluded.model,
                     provider=excluded.provider,
-                    duration_ms=excluded.duration_ms
+                    duration_ms=excluded.duration_ms,
+                    job_id=CASE WHEN assets.job_id IS NULL AND excluded.job_id IS NOT NULL THEN excluded.job_id ELSE assets.job_id END
                 """,
                 (
                     id, filename, storage_area, relative_path, url_path,
                     media_type, source, size, prompt, model, provider,
-                    duration_ms, now,
+                    duration_ms, now, job_id,
                 ),
             )
     except sqlite3.IntegrityError as exc:
@@ -519,15 +527,18 @@ def get_asset(asset_id: str) -> dict[str, Any] | None:
     return dict(row)
 
 
-def list_assets(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
-    """按 created_at DESC 分页列出资产。"""
+def list_assets(limit: int = 100, offset: int = 0, job_id: str | None = None) -> list[dict[str, Any]]:
+    """按 created_at DESC 分页列出资产，支持 job_id 过滤。"""
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
+    if job_id is not None:
+        sql = "SELECT * FROM assets WHERE job_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params: list[Any] = [job_id, limit, offset]
+    else:
+        sql = "SELECT * FROM assets ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params = [limit, offset]
     with closing(db_connect()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM assets ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(row) for row in rows]
 
 
