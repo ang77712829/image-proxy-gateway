@@ -471,6 +471,22 @@ class MediaService:
             # queued/submitted/running/processing → 不更新，保持 running
         # ── end job poll update ─────────────────────────
 
+        # ── poll completed 写入 video asset（旁路）──────
+        if poll_status in {"completed", "succeeded", "done"} and result.get("local_path"):
+            try:
+                _save_generated_asset(
+                    media_type="video",
+                    result=result,
+                    prompt=str((job or {}).get("prompt") or result.get("prompt") or ""),
+                    model=str((job or {}).get("model") or result.get("model") or ""),
+                    provider=str((job or {}).get("provider") or result.get("provider") or "agnes_video"),
+                    duration_ms=int(result.get("duration_ms") or 0),
+                    job_id=job_id,
+                )
+            except Exception:
+                log.warning("poll completed 写入 video asset 失败: task_id=%s", safe_task_id)
+        # ── end asset write ─────────────────────────────
+
         if job_id:
             result["job_id"] = job_id
         return result

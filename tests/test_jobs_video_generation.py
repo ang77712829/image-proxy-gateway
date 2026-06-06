@@ -10,7 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -637,6 +637,297 @@ class VideoJobKindFilterTest(_VideoJobTestBase):
             mock_av.poll_task = mock_poll
             result = await_compat(self.service.get_video("verify-video-id-001"))
         self.assertEqual(result["job_id"], video_job_id)
+
+
+# ── 33-42. poll completed 写入 video asset ────────────
+
+class VideoPollAssetJobIdTest(_VideoJobTestBase):
+    """GET /v1/videos/{task_id} poll completed 写入 asset + job_id。"""
+
+    def _create_video_job(self, external_task_id: str = "poll-asset-001", **kwargs) -> str:
+        from angemedia_gateway.state import create_job
+        defaults = dict(kind="video", status="running", provider="agnes_video",
+                        model="agnes-video-v2.0", prompt="test prompt")
+        defaults.update(kwargs)
+        defaults["external_task_id"] = external_task_id
+        job = create_job(**defaults)
+        return job["id"]
+
+    def _make_completed_result(self, task_id: str, local_path: str | None = None) -> dict:
+        result = {
+            "task_id": task_id,
+            "status": "completed",
+            "video_url": "http://example.com/video.mp4",
+            "prompt": "test prompt",
+            "model": "agnes-video-v2.0",
+            "provider": "agnes_video",
+            "duration_ms": 5000,
+        }
+        if local_path:
+            result["local_path"] = local_path
+        return result
+
+    def _get_assets_by_job_id(self, job_id: str) -> list[dict]:
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT * FROM assets WHERE job_id = ?", (job_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def _count_assets(self) -> int:
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            return conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _make_video_file(self, name: str) -> Path:
+        f = self._output_dir / name
+        f.write_bytes(b"\x00\x00\x00\x00")
+        return f
+
+    def test_poll_completed_writes_asset(self) -> None:
+        """poll completed 后写入 video asset。"""
+        self._create_video_job("poll-asset-001")
+        fake_file = self._make_video_file("video-poll.mp4")
+        mock_result = self._make_completed_result("poll-asset-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-asset-001"))
+        self.assertGreaterEqual(self._count_assets(), 1)
+
+    def test_poll_completed_asset_job_id_matches_job(self) -> None:
+        """poll completed 后 asset.job_id 等于 video job id。"""
+        job_id = self._create_video_job("poll-asset-002")
+        fake_file = self._make_video_file("video-poll-2.mp4")
+        mock_result = self._make_completed_result("poll-asset-002", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-asset-002"))
+        assets = self._get_assets_by_job_id(job_id)
+        self.assertEqual(len(assets), 1)
+        self.assertEqual(assets[0]["job_id"], job_id)
+
+    def test_poll_completed_no_job_asset_job_id_null(self) -> None:
+        """poll completed 找不到 job 时，asset 仍保存且 job_id=NULL。"""
+        fake_file = self._make_video_file("video-no-job.mp4")
+        mock_result = self._make_completed_result("no-job-task", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("no-job-task"))
+        self.assertGreaterEqual(self._count_assets(), 1)
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            row = conn.execute(
+                "SELECT job_id FROM assets WHERE url_path LIKE '%video-no-job%'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertIsNone(row[0])
+        finally:
+            conn.close()
+
+    def test_poll_running_no_asset(self) -> None:
+        """poll running/submitted 时不写 asset。"""
+        self._create_video_job("poll-running-001")
+        count_before = self._count_assets()
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-running-001",
+            "status": "running",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-running-001"))
+        self.assertEqual(self._count_assets(), count_before)
+
+    def test_poll_failed_no_asset(self) -> None:
+        """poll failed/error 时不写 asset。"""
+        self._create_video_job("poll-failed-001")
+        count_before = self._count_assets()
+        mock_poll = AsyncMock(return_value={
+            "task_id": "poll-failed-001",
+            "status": "failed",
+            "error": "generation failed",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-failed-001"))
+        self.assertEqual(self._count_assets(), count_before)
+
+    def test_repeated_poll_completed_no_duplicate(self) -> None:
+        """repeated poll completed 不产生重复 asset。"""
+        self._create_video_job("poll-repeated-001")
+        fake_file = self._make_video_file("video-repeated.mp4")
+        mock_result = self._make_completed_result("poll-repeated-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-repeated-001"))
+            count_after_first = self._count_assets()
+            await_compat(self.service.get_video("poll-repeated-001"))
+            count_after_second = self._count_assets()
+            self.assertEqual(count_after_first, count_after_second)
+
+    def test_existing_asset_job_id_not_overwritten(self) -> None:
+        """已有 asset.job_id=old 时，poll completed 不覆盖 old。"""
+        from angemedia_gateway.state import save_asset
+        save_asset(
+            id="old-asset", filename="existing.mp4", storage_area="output",
+            relative_path="existing-video.mp4", url_path="/generated/existing-video.mp4",
+            media_type="video", source="generated", size=100,
+            job_id="old-job-id",
+        )
+        fake_file = self._make_video_file("existing-video.mp4")
+        self._create_video_job("existing-asset-001")
+        mock_result = self._make_completed_result("existing-asset-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("existing-asset-001"))
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            row = conn.execute(
+                "SELECT job_id FROM assets WHERE relative_path = 'existing-video.mp4'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], "old-job-id")
+        finally:
+            conn.close()
+
+    def test_asset_save_failure_does_not_block_poll(self) -> None:
+        """_save_generated_asset 抛异常时，poll response 仍正常。"""
+        self._create_video_job("poll-save-fail-001")
+        fake_file = self._make_video_file("fail-video.mp4")
+        mock_result = self._make_completed_result("poll-save-fail-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize), \
+             patch("angemedia_gateway.services.media_service._save_generated_asset",
+                    side_effect=RuntimeError("asset write failed")):
+            mock_av.poll_task = mock_poll
+            result = await_compat(self.service.get_video("poll-save-fail-001"))
+        self.assertIn("task_id", result)
+        self.assertEqual(result["task_id"], "poll-save-fail-001")
+
+    def test_poll_completed_asset_url_path_uses_localized(self) -> None:
+        """_save_generated_asset 收到的 result 包含 localize 后的 local_path。"""
+        self._create_video_job("poll-url-001")
+        fake_file = self._make_video_file("localized-video.mp4")
+        mock_result = self._make_completed_result("poll-url-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        mock_save = MagicMock()
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize), \
+             patch("angemedia_gateway.services.media_service._save_generated_asset", mock_save):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-url-001"))
+        mock_save.assert_called_once()
+        call_result = mock_save.call_args.kwargs.get("result")
+        self.assertIsNotNone(call_result)
+        self.assertIn("local_path", call_result)
+        self.assertIn("localized-video.mp4", call_result["local_path"])
+
+    def test_null_job_id_filled_by_poll(self) -> None:
+        """已有 asset.job_id=NULL 时，poll completed 补写 job_id（真实 DB 集成测试）。"""
+        from angemedia_gateway.state import save_asset
+        # 1. 创建 job_id=NULL 的 asset
+        save_asset(
+            id="null-asset", filename="fill.mp4", storage_area="output",
+            relative_path="fill-video.mp4", url_path="/generated/fill-video.mp4",
+            media_type="video", source="generated", size=100,
+        )
+        # 2. 创建同名真实文件
+        fake_file = self._make_video_file("fill-video.mp4")
+        # 3. 创建 video job
+        job_id = self._create_video_job("fill-job-001")
+        # 4. mock poll_task + localize_video_result
+        mock_result = self._make_completed_result("fill-job-001", local_path=str(fake_file))
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize):
+            mock_av.poll_task = mock_poll
+            # 5. 调用 get_video
+            await_compat(self.service.get_video("fill-job-001"))
+        # 6. 直接查询 DB
+        import sqlite3
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            # 只有 1 条记录
+            count = conn.execute(
+                "SELECT COUNT(*) FROM assets WHERE relative_path = 'fill-video.mp4'"
+            ).fetchone()[0]
+            self.assertEqual(count, 1)
+            # job_id 已被补写
+            row = conn.execute(
+                "SELECT job_id FROM assets WHERE relative_path = 'fill-video.mp4'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row[0], job_id)
+        finally:
+            conn.close()
+
+    def test_metadata_fallback_from_job(self) -> None:
+        """poll result 无 prompt/model/provider 时，从 job 获取 metadata。"""
+        job_id = self._create_video_job(
+            "poll-meta-001", prompt="from-job-prompt", model="from-job-model", provider="from-job-provider",
+        )
+        fake_file = self._make_video_file("meta-video.mp4")
+        mock_result = {
+            "task_id": "poll-meta-001",
+            "status": "completed",
+            "video_url": "http://example.com/video.mp4",
+            "local_path": str(fake_file),
+            "duration_ms": 3000,
+        }
+        mock_poll = AsyncMock(return_value=mock_result)
+        mock_localize = AsyncMock(return_value=mock_result)
+        mock_save = MagicMock()
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av, \
+             patch("angemedia_gateway.services.media_service.localize_video_result", mock_localize), \
+             patch("angemedia_gateway.services.media_service._save_generated_asset", mock_save):
+            mock_av.poll_task = mock_poll
+            await_compat(self.service.get_video("poll-meta-001"))
+        mock_save.assert_called_once()
+        call_kwargs = mock_save.call_args
+        self.assertEqual(call_kwargs.kwargs.get("prompt"), "from-job-prompt")
+        self.assertEqual(call_kwargs.kwargs.get("model"), "from-job-model")
+        self.assertEqual(call_kwargs.kwargs.get("provider"), "from-job-provider")
+
+    def test_submit_path_still_no_asset(self) -> None:
+        """submit path 仍不产生 asset。"""
+        count_before = self._count_assets()
+        mock_submit = AsyncMock(return_value={
+            "task_id": "submit-check-001",
+            "status": "queued",
+        })
+        with patch("angemedia_gateway.services.media_service.agnes_video") as mock_av:
+            mock_av.submit_task = mock_submit
+            with patch("angemedia_gateway.services.media_service.builtin_provider_enabled", return_value=True):
+                await_compat(self.service.create_video(self._make_request()))
+        self.assertEqual(self._count_assets(), count_before)
 
 
 def await_compat(coro):
