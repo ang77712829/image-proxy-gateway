@@ -13,13 +13,16 @@ from ..providers.base import BackendUnavailable, RateLimited
 from ..providers.custom import generate_custom_openai_image
 from ..routing import resolve_chain
 from ..schemas import ImageRequest, VideoRequest
-from ..security import validate_task_id
+from ..security import redact_secret_text, validate_task_id
 from ..state import (
     builtin_provider_enabled,
+    create_job,
     get_custom_provider,
     now_iso,
     record_generation,
+    safe_json,
     save_asset,
+    update_job_status,
     upsert_video_task,
 )
 from ..runtime import PROVIDERS, agnes_video
@@ -114,6 +117,35 @@ def _save_generated_asset(
         )
 
 
+def _safe_output_json(result: dict[str, Any]) -> str:
+    """构建最小 output_json 摘要，不存储完整 b64 内容。"""
+    data = result.get("data")
+    has_url = False
+    has_b64 = False
+    image_count = 0
+    if isinstance(data, list):
+        image_count = len(data)
+        for item in data:
+            if isinstance(item, dict):
+                if item.get("url"):
+                    has_url = True
+                if item.get("b64_json"):
+                    has_b64 = True
+    summary: dict[str, Any] = {
+        "provider": result.get("provider", ""),
+        "model": result.get("model", ""),
+        "history_id": result.get("history_id", ""),
+        "image_count": image_count,
+        "has_url": has_url,
+        "has_b64_json": has_b64,
+    }
+    if has_url:
+        first = data[0] if isinstance(data, list) and data else {}
+        if isinstance(first, dict) and first.get("url"):
+            summary["url"] = first["url"]
+    return safe_json(summary)
+
+
 class MediaService:
     async def create_image(self, req: ImageRequest) -> dict[str, Any]:
         if req.model and req.model.startswith("custom:"):
@@ -126,46 +158,92 @@ class MediaService:
         if provider is None:
             raise CustomProviderNotFound(f"自定义渠道不存在：{provider_id}")
 
+        job_id: str | None = None
+        try:
+            job_id = create_job(
+                kind="image", status="queued", prompt=req.prompt,
+                input_json=safe_json({"model": req.model, "size": req.size, "response_format": req.response_format}),
+            )["id"]
+        except Exception:
+            log.warning("创建 image job 失败（不影响生成）")
+
         started_at = now_iso()
         started = time.perf_counter()
-        result = await generate_custom_openai_image(req, provider)
-        if req.response_format == "url":
-            result = await localize_image_result(result, f"custom_{provider_id}", provider.get("default_model", "custom"))
-        elif req.response_format == "b64_json":
-            result = await maybe_to_b64(result, req.response_format)
+        if job_id:
+            try:
+                update_job_status(job_id, status="running", provider=f"custom:{provider_id}", model=provider.get("default_model"), started_at=started_at)
+            except Exception:
+                log.warning("更新 image job running 状态失败: job_id=%s", job_id)
+        try:
+            result = await generate_custom_openai_image(req, provider)
+            if req.response_format == "url":
+                result = await localize_image_result(result, f"custom_{provider_id}", provider.get("default_model", "custom"))
+            elif req.response_format == "b64_json":
+                result = await maybe_to_b64(result, req.response_format)
 
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        result["provider"] = f"custom:{provider_id}"
-        result["model"] = str(provider.get("default_model") or f"custom:{provider_id}")
-        result["duration_ms"] = duration_ms
-        record_id = record_generation(
-            media_type="image",
-            prompt=req.prompt,
-            enhanced_prompt=None,
-            model=f"custom:{provider_id}",
-            status="completed",
-            result=result,
-            provider=f"custom:{provider_id}",
-            request_model=req.model,
-            input_mode="custom_provider",
-            duration_ms=duration_ms,
-            started_at=started_at,
-        )
-        _save_generated_asset(
-            media_type="image",
-            result=result,
-            prompt=req.prompt,
-            model=f"custom:{provider_id}",
-            provider=f"custom:{provider_id}",
-            duration_ms=duration_ms,
-        )
-        result["history_id"] = record_id
-        return result
+            duration_ms = int((time.perf_counter() - started) * 1000)
+            result["provider"] = f"custom:{provider_id}"
+            result["model"] = str(provider.get("default_model") or f"custom:{provider_id}")
+            result["duration_ms"] = duration_ms
+            record_id = record_generation(
+                media_type="image",
+                prompt=req.prompt,
+                enhanced_prompt=None,
+                model=f"custom:{provider_id}",
+                status="completed",
+                result=result,
+                provider=f"custom:{provider_id}",
+                request_model=req.model,
+                input_mode="custom_provider",
+                duration_ms=duration_ms,
+                started_at=started_at,
+            )
+            _save_generated_asset(
+                media_type="image",
+                result=result,
+                prompt=req.prompt,
+                model=f"custom:{provider_id}",
+                provider=f"custom:{provider_id}",
+                duration_ms=duration_ms,
+            )
+            result["history_id"] = record_id
+            if job_id:
+                try:
+                    update_job_status(
+                        job_id, status="succeeded",
+                        output_json=_safe_output_json(result),
+                        completed_at=now_iso(), duration_ms=duration_ms,
+                    )
+                except Exception:
+                    log.warning("更新 image job succeeded 状态失败: job_id=%s", job_id)
+                result["job_id"] = job_id
+            return result
+        except Exception:
+            if job_id:
+                try:
+                    update_job_status(
+                        job_id, status="failed",
+                        error_code="image_generation_failed",
+                        error_message="custom provider 调用失败",
+                        completed_at=now_iso(),
+                    )
+                except Exception:
+                    log.warning("更新 image job failed 状态失败: job_id=%s", job_id)
+            raise
 
     async def _create_builtin_image(self, req: ImageRequest) -> dict[str, Any]:
         chain = resolve_chain(req.model)
         if not chain:
             raise NoImageProviderAvailable("当前没有可用图片渠道：所选模型已停用或默认链路全部停用")
+
+        job_id: str | None = None
+        try:
+            job_id = create_job(
+                kind="image", status="queued", prompt=req.prompt,
+                input_json=safe_json({"model": req.model, "size": req.size, "response_format": req.response_format}),
+            )["id"]
+        except Exception:
+            log.warning("创建 image job 失败（不影响生成）")
 
         errors: list[str] = []
         for target in chain:
@@ -176,8 +254,13 @@ class MediaService:
                 errors.append(f"{backend}/{model}: unknown provider")
                 continue
 
+            started_at = now_iso()
+            if job_id:
+                try:
+                    update_job_status(job_id, status="running", provider=backend, model=model, started_at=started_at)
+                except Exception:
+                    log.warning("更新 image job running 状态失败: job_id=%s", job_id)
             try:
-                started_at = now_iso()
                 started = time.perf_counter()
                 result = await provider.generate(req, target)
                 if req.response_format == "url":
@@ -212,6 +295,16 @@ class MediaService:
                     duration_ms=duration_ms,
                 )
                 result["history_id"] = record_id
+                if job_id:
+                    try:
+                        update_job_status(
+                            job_id, status="succeeded",
+                            output_json=_safe_output_json(result),
+                            completed_at=now_iso(), duration_ms=duration_ms,
+                        )
+                    except Exception:
+                        log.warning("更新 image job succeeded 状态失败: job_id=%s", job_id)
+                    result["job_id"] = job_id
                 log.info("%s succeeded: model=%s", backend, model)
                 return result
             except RateLimited as exc:
@@ -230,6 +323,16 @@ class MediaService:
                 errors.append(message)
                 continue
 
+        if job_id:
+            try:
+                update_job_status(
+                    job_id, status="failed",
+                    error_code="all_providers_failed",
+                    error_message=redact_secret_text("; ".join(errors))[:500],
+                    completed_at=now_iso(),
+                )
+            except Exception:
+                log.warning("更新 image job failed 状态失败: job_id=%s", job_id)
         raise ImageProvidersFailed(errors)
 
     async def create_video(self, req: VideoRequest) -> dict[str, Any]:
