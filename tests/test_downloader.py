@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -29,6 +29,70 @@ from angemedia_gateway.state import (
     generation_metadata_by_filename,
     known_generated_local_paths,
 )
+
+
+class DownloadTimeoutLimitsTest(unittest.TestCase):
+    """验证 fetch_public_remote_media 传入正确的 httpx.Timeout 和 httpx.Limits。"""
+
+    def _make_fake_client(self, captured: dict):
+        """返回一个 fake httpx.AsyncClient 工厂，捕获 timeout/limits 并正常完成下载。"""
+
+        async def _async_iter_chunks(chunks):
+            for chunk in chunks:
+                yield chunk
+
+        def fake_client(**kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+            captured["limits"] = kwargs.get("limits")
+
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            fake_response = AsyncMock()
+            fake_response.status_code = 200
+            fake_response.headers = {"content-type": "image/png", "content-length": "4"}
+            fake_response.raise_for_status = lambda: None
+            fake_response.aiter_bytes = MagicMock(return_value=_async_iter_chunks([b"test"]))
+            fake_response.aclose = AsyncMock()
+
+            mock_client.build_request = MagicMock(return_value="fake-request")
+            mock_client.send = AsyncMock(return_value=fake_response)
+            return mock_client
+
+        return fake_client
+
+    def test_timeout_object_values(self):
+        async def _run():
+            import httpx
+            captured = {}
+            with patch("angemedia_gateway.media.httpx.AsyncClient", side_effect=self._make_fake_client(captured)):
+                with patch("angemedia_gateway.media.validate_public_http_url", return_value="http://example.com/test.png"):
+                    from angemedia_gateway.media import fetch_public_remote_media
+                    result = await fetch_public_remote_media("http://example.com/test.png")
+            self.assertIsInstance(result[0], bytes)
+            self.assertIsInstance(captured["timeout"], httpx.Timeout)
+            self.assertEqual(captured["timeout"].connect, C.MEDIA_DOWNLOAD_CONNECT_TIMEOUT)
+            self.assertEqual(captured["timeout"].read, C.MEDIA_DOWNLOAD_READ_TIMEOUT)
+            self.assertEqual(captured["timeout"].write, C.MEDIA_DOWNLOAD_WRITE_TIMEOUT)
+            self.assertEqual(captured["timeout"].pool, C.MEDIA_DOWNLOAD_POOL_TIMEOUT)
+        asyncio.run(_run())
+
+    def test_limits_object_values(self):
+        async def _run():
+            import httpx
+            captured = {}
+            with patch("angemedia_gateway.media.httpx.AsyncClient", side_effect=self._make_fake_client(captured)):
+                with patch("angemedia_gateway.media.validate_public_http_url", return_value="http://example.com/test.png"):
+                    from angemedia_gateway.media import fetch_public_remote_media
+                    await fetch_public_remote_media("http://example.com/test.png")
+            self.assertIsInstance(captured["limits"], httpx.Limits)
+            self.assertEqual(captured["limits"].max_connections, C.MEDIA_DOWNLOAD_CONCURRENCY)
+            self.assertEqual(captured["limits"].max_keepalive_connections, C.MEDIA_DOWNLOAD_CONCURRENCY)
+        asyncio.run(_run())
+
+    def test_default_concurrency_is_one(self):
+        self.assertEqual(C.MEDIA_DOWNLOAD_CONCURRENCY, 1)
 
 
 class ExtensionFromResponseTest(unittest.TestCase):

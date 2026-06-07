@@ -54,7 +54,17 @@ async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:
     """下载公开远端媒体，限制大小，并对初始 URL 与每次重定向做 SSRF 校验。"""
     chunks: list[bytes] = []
     total = 0
-    async with httpx.AsyncClient(timeout=C.HTTP_TIMEOUT) as client:
+    timeout = httpx.Timeout(
+        connect=C.MEDIA_DOWNLOAD_CONNECT_TIMEOUT,
+        read=C.MEDIA_DOWNLOAD_READ_TIMEOUT,
+        write=C.MEDIA_DOWNLOAD_WRITE_TIMEOUT,
+        pool=C.MEDIA_DOWNLOAD_POOL_TIMEOUT,
+    )
+    limits = httpx.Limits(
+        max_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
+        max_keepalive_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
+    )
+    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
         response, final_url = await _send_public_get(client, url)
         try:
             response.raise_for_status()
