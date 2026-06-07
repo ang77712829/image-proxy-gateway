@@ -67,6 +67,26 @@ class GatewaySmokeTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 400, response.text)
                 self.assertIn("detail", response.json())
 
+    def test_health_returns_ok(self) -> None:
+        """/health 精确等于 {"status": "ok"}。"""
+        response = self.client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_health_no_forbidden_fields(self) -> None:
+        """/health 不包含敏感字段。"""
+        response = self.client.get("/health")
+        body = response.json()
+        forbidden = [
+            "name", "version", "auth_enabled",
+            "siliconflow", "modelscope", "pollinations",
+            "openai_image", "agnes_image", "agnes_video",
+            "storage_ready", "assistant", "models",
+            "configured", "enabled",
+        ]
+        for field in forbidden:
+            self.assertNotIn(field, body, f"/health 不应包含 {field}")
+
 
 if __name__ == "__main__":
     unittest.main()

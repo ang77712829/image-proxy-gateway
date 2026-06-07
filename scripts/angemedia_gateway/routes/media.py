@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import config as C
-from ..assistant import assistant_enabled, build_assistant_plan
+from ..assistant import build_assistant_plan
 from ..providers.base import BackendUnavailable, RateLimited
 from ..routing import MODEL_ALIASES, build_route_response, enhance_prompt_text
 from ..schemas import AssistantRequest, EnhanceRequest, ImageRequest, RouteRequest, VideoRequest
@@ -68,44 +67,8 @@ async def _get_video_response(task_id: str) -> dict[str, Any]:
 
 
 @router.get("/health")
-async def health() -> dict[str, Any]:
-    enabled_models = [name for name, target in MODEL_ALIASES.items() if builtin_provider_enabled(target.provider)]
-    return {
-        "name": "AngeMedia Gateway",
-        "version": "v0.1.0",
-        "status": "ok",
-        "auth_enabled": bool(C.GATEWAY_API_KEY),
-        "siliconflow": {
-            "enabled": builtin_provider_enabled("siliconflow"),
-            "configured": bool(C.SILICONFLOW_API_KEY),
-        },
-        "modelscope": {
-            "enabled": builtin_provider_enabled("modelscope"),
-            "configured": bool(C.MODELSCOPE_API_KEY),
-        },
-        "pollinations": {
-            "enabled": builtin_provider_enabled("pollinations"),
-            "configured": True,
-        },
-        "openai_image": {
-            "enabled": builtin_provider_enabled("openai_image"),
-            "configured": bool(C.OPENAI_IMAGE_API_KEY),
-        },
-        "agnes_image": {
-            "enabled": builtin_provider_enabled("agnes_image"),
-            "configured": bool(C.AGNES_API_KEY),
-        },
-        "agnes_video": {
-            "enabled": builtin_provider_enabled("agnes_video"),
-            "configured": bool(C.AGNES_API_KEY),
-        },
-        "storage_ready": C.OUTPUT_DIR.exists() and C.UPLOAD_DIR.exists() and C.DB_FILE.parent.exists(),
-        "assistant": {
-            "enabled": assistant_enabled(),
-            "configured": bool(get_config("ANGE_LLM_API_KEY", os.getenv("ANGE_LLM_API_KEY", "")).strip()),
-        },
-        "models": enabled_models,
-    }
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @router.get("/v1/models", dependencies=[Depends(require_auth)])
