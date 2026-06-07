@@ -4,8 +4,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import mimetypes
+import os
 import re
 import urllib.parse
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -141,10 +143,23 @@ async def download_remote_media(url: str, prefix: str, fallback_ext: str, stable
     content, content_type, final_url = await fetch_public_remote_media(url)
     ext = extension_from_response(final_url, content_type, fallback_ext)
     filename = stable_filename(prefix, url, ext, stable_id=stable_id)
-    path = C.OUTPUT_DIR / filename
-    if not path.exists():
-        path.write_bytes(content)
-    return f"{C.PUBLIC_BASE_URL}/generated/{filename}", str(path)
+    final_path = C.OUTPUT_DIR / filename
+    if final_path.exists():
+        return f"{C.PUBLIC_BASE_URL}/generated/{filename}", str(final_path)
+
+    tmp_dir = C.OUTPUT_DIR / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / f"{filename}.{uuid.uuid4().hex}.part"
+    try:
+        tmp_path.write_bytes(content)
+        os.replace(str(tmp_path), str(final_path))
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return f"{C.PUBLIC_BASE_URL}/generated/{filename}", str(final_path)
 
 
 async def try_download_remote_media(
