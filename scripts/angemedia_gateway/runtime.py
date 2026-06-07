@@ -12,6 +12,7 @@ from fastapi import Cookie, Header, HTTPException, Request, UploadFile
 
 from . import config as C
 from .adapters.agnes_video import AgnesVideoProvider
+from .media import cleanup_controlled_download_tmp_dir
 from .providers.image import build_providers
 from .state import (
     apply_saved_config_to_runtime,
@@ -33,6 +34,7 @@ logging.basicConfig(
 
 C.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 C.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+cleanup_controlled_download_tmp_dir()
 
 init_db()
 ensure_default_admin_user()

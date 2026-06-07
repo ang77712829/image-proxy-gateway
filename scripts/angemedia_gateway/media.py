@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 import mimetypes
 import os
 import re
@@ -18,6 +19,8 @@ from .security import validate_public_http_url
 
 REMOTE_MEDIA_CHUNK_SIZE = 1024 * 1024
 REMOTE_MEDIA_MAX_REDIRECTS = 5
+
+log = logging.getLogger("angemedia-gateway")
 
 
 def openai_image_response(*, url: str | None = None, b64_json: str | None = None) -> dict[str, Any]:
@@ -62,6 +65,55 @@ def _remote_media_http_client() -> httpx.AsyncClient:
         max_keepalive_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
     )
     return httpx.AsyncClient(timeout=timeout, limits=limits)
+
+
+def cleanup_controlled_download_tmp_dir() -> dict[str, int]:
+    """Remove controlled download temp files left by interrupted localize writes."""
+    result = {"part_removed": 0, "copying_removed": 0, "errors": 0}
+    output_dir = C.OUTPUT_DIR
+    tmp_dir = output_dir / ".tmp"
+    if tmp_dir.is_symlink():
+        log.warning("Download tmp path is a symlink and will not be cleaned: %s", tmp_dir)
+        result["errors"] += 1
+        return result
+    if not tmp_dir.exists():
+        return result
+    if not tmp_dir.is_dir():
+        log.warning("Download tmp path is not a directory: %s", tmp_dir)
+        result["errors"] += 1
+        return result
+
+    try:
+        output_root = output_dir.resolve()
+        tmp_root = tmp_dir.resolve()
+        tmp_root.relative_to(output_root)
+    except (OSError, ValueError) as exc:
+        log.warning("Skip unsafe download tmp cleanup for %s: %s", tmp_dir, exc)
+        result["errors"] += 1
+        return result
+
+    for path in tmp_dir.iterdir():
+        if path.suffix not in {".part", ".copying"}:
+            continue
+        if not path.is_file():
+            continue
+        try:
+            path.resolve().relative_to(tmp_root)
+        except (OSError, ValueError) as exc:
+            log.warning("Skip unsafe download tmp file cleanup for %s: %s", path, exc)
+            result["errors"] += 1
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            log.warning("Failed to remove download tmp file %s: %s", path, exc)
+            result["errors"] += 1
+            continue
+        if path.suffix == ".part":
+            result["part_removed"] += 1
+        else:
+            result["copying_removed"] += 1
+    return result
 
 
 async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:

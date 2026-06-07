@@ -20,6 +20,7 @@ os.environ.setdefault("MEDIA_DOWNLOAD_MAX_BYTES", "10485760")
 
 import angemedia_gateway.config as C
 from angemedia_gateway.media import (
+    cleanup_controlled_download_tmp_dir,
     download_remote_media,
     extension_from_response,
     stable_filename,
@@ -144,6 +145,131 @@ class StableFilenameTest(unittest.TestCase):
         a = stable_filename("image", "http://example.com/a.png", ".png", stable_id="fixed-id")
         b = stable_filename("image", "http://example.com/b.png", ".png", stable_id="fixed-id")
         self.assertEqual(a, b)
+
+
+class ControlledTmpCleanupTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="controlled-tmp-cleanup-test-")
+        self._orig_output_dir = C.OUTPUT_DIR
+        self._orig_upload_dir = C.UPLOAD_DIR
+        C.OUTPUT_DIR = Path(self._tmp_dir) / "output"
+        C.UPLOAD_DIR = Path(self._tmp_dir) / "uploads"
+        C.OUTPUT_DIR.mkdir()
+        C.UPLOAD_DIR.mkdir()
+
+    def tearDown(self):
+        C.OUTPUT_DIR = self._orig_output_dir
+        C.UPLOAD_DIR = self._orig_upload_dir
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def test_removes_direct_part_and_copying_files(self):
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        tmp_dir.mkdir()
+        part = tmp_dir / "a.part"
+        copying = tmp_dir / "a.copying"
+        part.write_bytes(b"part")
+        copying.write_bytes(b"copying")
+
+        result = cleanup_controlled_download_tmp_dir()
+
+        self.assertFalse(part.exists())
+        self.assertFalse(copying.exists())
+        self.assertEqual(result["part_removed"], 1)
+        self.assertEqual(result["copying_removed"], 1)
+        self.assertEqual(result["errors"], 0)
+
+    def test_preserves_final_upload_nested_and_other_suffixes(self):
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        nested = tmp_dir / "nested"
+        nested.mkdir(parents=True)
+        final_file = C.OUTPUT_DIR / "final.png"
+        upload_file = C.UPLOAD_DIR / "upload.png"
+        nested_part = nested / "a.part"
+        keep_tmp = tmp_dir / "keep.tmp"
+        readme = tmp_dir / "readme.txt"
+        final_file.write_bytes(b"final")
+        upload_file.write_bytes(b"upload")
+        nested_part.write_bytes(b"nested")
+        keep_tmp.write_bytes(b"tmp")
+        readme.write_text("readme", encoding="utf-8")
+
+        result = cleanup_controlled_download_tmp_dir()
+
+        self.assertTrue(final_file.exists())
+        self.assertTrue(upload_file.exists())
+        self.assertTrue(nested_part.exists())
+        self.assertTrue(keep_tmp.exists())
+        self.assertTrue(readme.exists())
+        self.assertEqual(result["part_removed"], 0)
+        self.assertEqual(result["copying_removed"], 0)
+        self.assertEqual(result["errors"], 0)
+
+    def test_missing_tmp_dir_returns_zero_counts(self):
+        result = cleanup_controlled_download_tmp_dir()
+
+        self.assertEqual(result["part_removed"], 0)
+        self.assertEqual(result["copying_removed"], 0)
+        self.assertEqual(result["errors"], 0)
+
+    def test_tmp_path_that_is_not_directory_is_not_deleted(self):
+        tmp_path = C.OUTPUT_DIR / ".tmp"
+        tmp_path.write_text("not a directory", encoding="utf-8")
+
+        result = cleanup_controlled_download_tmp_dir()
+
+        self.assertTrue(tmp_path.exists())
+        self.assertEqual(result["part_removed"], 0)
+        self.assertEqual(result["copying_removed"], 0)
+        self.assertEqual(result["errors"], 1)
+
+    def test_tmp_symlink_is_not_followed(self):
+        target_dir = C.OUTPUT_DIR / "target-tmp"
+        target_dir.mkdir()
+        target_part = target_dir / "a.part"
+        target_part.write_bytes(b"target")
+        tmp_link = C.OUTPUT_DIR / ".tmp"
+        try:
+            tmp_link.symlink_to(target_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink unavailable: {exc}")
+
+        result = cleanup_controlled_download_tmp_dir()
+
+        self.assertTrue(target_part.exists())
+        self.assertEqual(result["part_removed"], 0)
+        self.assertEqual(result["copying_removed"], 0)
+        self.assertEqual(result["errors"], 1)
+
+    def test_unlink_failure_reports_error_and_continues(self):
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        tmp_dir.mkdir()
+        locked = tmp_dir / "locked.part"
+        removable = tmp_dir / "done.copying"
+        locked.write_bytes(b"locked")
+        removable.write_bytes(b"done")
+        original_unlink = Path.unlink
+
+        def maybe_fail(path_self, *args, **kwargs):
+            if path_self.name == "locked.part":
+                raise OSError("locked")
+            return original_unlink(path_self, *args, **kwargs)
+
+        with patch("angemedia_gateway.media.Path.unlink", autospec=True, side_effect=maybe_fail):
+            result = cleanup_controlled_download_tmp_dir()
+
+        self.assertTrue(locked.exists())
+        self.assertFalse(removable.exists())
+        self.assertEqual(result["part_removed"], 0)
+        self.assertEqual(result["copying_removed"], 1)
+        self.assertEqual(result["errors"], 1)
+
+
+class RuntimeStartupCleanupWiringTest(unittest.TestCase):
+    def test_runtime_invokes_controlled_download_tmp_cleanup(self):
+        runtime_source = (ROOT / "scripts" / "angemedia_gateway" / "runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn("from .media import cleanup_controlled_download_tmp_dir", runtime_source)
+        self.assertIn("cleanup_controlled_download_tmp_dir()", runtime_source)
 
 
 class _AtomicWriteTestBase(unittest.TestCase):
