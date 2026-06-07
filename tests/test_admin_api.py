@@ -629,6 +629,25 @@ class AdminApiWriteTest(unittest.TestCase):
         custom_ids = [item["id"] for item in response.json()["data"]]
         self.assertNotIn("mock", custom_ids, "Mock Provider 不应出现在 custom providers 列表中")
 
+    def test_list_custom_providers_sort_and_secret_mask(self) -> None:
+        """list_custom_providers() 真实 SQL 路径：排序正确 + api_key 脱敏。"""
+        first_id = self.unique_provider_id("list-first")
+        second_id = self.unique_provider_id("list-second")
+        self.create_custom_provider(first_id, sort_order=300)
+        self.create_custom_provider(second_id, sort_order=100)
+
+        resp = self.client.get("/v1/admin/providers")
+        self.assertEqual(resp.status_code, 200, resp.text)
+        rows = resp.json()["data"]
+        self.assertGreaterEqual(len(rows), 2)
+        # sort_order ASC, created_at DESC → second (100) 在 first (300) 前
+        ids = [r["id"] for r in rows]
+        self.assertLess(ids.index(second_id), ids.index(first_id))
+        # api_key 被脱敏
+        for r in rows:
+            if r["api_key"]:
+                self.assertIn("*", r["api_key"])
+
 
 if __name__ == "__main__":
     unittest.main()
