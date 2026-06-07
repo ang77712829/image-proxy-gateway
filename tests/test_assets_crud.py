@@ -522,7 +522,7 @@ class DeleteAssetTest(_AssetCrudTestBase):
         def _always_reject(path_text: str, base_dir: Path) -> bool:
             raise HTTPException(status_code=400, detail="拒绝删除目录外文件")
 
-        with patch("angemedia_gateway.state.safe_unlink_under", side_effect=_always_reject):
+        with patch("angemedia_gateway.repositories.assets.safe_unlink_under", side_effect=_always_reject):
             with self.assertRaises(HTTPException):
                 delete_asset("del-005")
         # DB 记录应保留
