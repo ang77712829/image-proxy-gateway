@@ -50,10 +50,7 @@ async def _send_public_get(client: httpx.AsyncClient, url: str) -> tuple[httpx.R
     raise RuntimeError(f"远端媒体重定向超过 {REMOTE_MEDIA_MAX_REDIRECTS} 次")
 
 
-async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:
-    """下载公开远端媒体，限制大小，并对初始 URL 与每次重定向做 SSRF 校验。"""
-    chunks: list[bytes] = []
-    total = 0
+def _remote_media_http_client() -> httpx.AsyncClient:
     timeout = httpx.Timeout(
         connect=C.MEDIA_DOWNLOAD_CONNECT_TIMEOUT,
         read=C.MEDIA_DOWNLOAD_READ_TIMEOUT,
@@ -64,7 +61,14 @@ async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:
         max_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
         max_keepalive_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
     )
-    async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+    return httpx.AsyncClient(timeout=timeout, limits=limits)
+
+
+async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:
+    """下载公开远端媒体，限制大小，并对初始 URL 与每次重定向做 SSRF 校验。"""
+    chunks: list[bytes] = []
+    total = 0
+    async with _remote_media_http_client() as client:
         response, final_url = await _send_public_get(client, url)
         try:
             response.raise_for_status()
@@ -87,6 +91,35 @@ async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:
         finally:
             await response.aclose()
     return b"".join(chunks), content_type, final_url
+
+
+async def _stream_public_remote_media_to_path(url: str, tmp_path: Path) -> tuple[str, str]:
+    """把公开远端媒体流式写入临时文件，返回 content_type 和 final_url。"""
+    total = 0
+    async with _remote_media_http_client() as client:
+        response, final_url = await _send_public_get(client, url)
+        try:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            length_text = response.headers.get("content-length")
+            if length_text:
+                try:
+                    content_length = int(length_text)
+                    if content_length > C.MEDIA_DOWNLOAD_MAX_BYTES:
+                        raise RuntimeError(f"远端媒体过大：{content_length} bytes，超过 MEDIA_DOWNLOAD_MAX_BYTES")
+                except ValueError:
+                    pass
+            with tmp_path.open("wb") as fh:
+                async for chunk in response.aiter_bytes(REMOTE_MEDIA_CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > C.MEDIA_DOWNLOAD_MAX_BYTES:
+                        raise RuntimeError(f"远端媒体过大：{total} bytes，超过 MEDIA_DOWNLOAD_MAX_BYTES")
+                    fh.write(chunk)
+        finally:
+            await response.aclose()
+    return content_type, final_url
 
 
 async def maybe_to_b64(result: dict[str, Any], response_format: str) -> dict[str, Any]:
@@ -150,18 +183,17 @@ async def download_remote_media(url: str, prefix: str, fallback_ext: str, stable
     if not _is_http_url(url) or is_generated_local_url(url):
         return url, ""
 
-    content, content_type, final_url = await fetch_public_remote_media(url)
-    ext = extension_from_response(final_url, content_type, fallback_ext)
-    filename = stable_filename(prefix, url, ext, stable_id=stable_id)
-    final_path = C.OUTPUT_DIR / filename
-    if final_path.exists():
-        return f"{C.PUBLIC_BASE_URL}/generated/{filename}", str(final_path)
-
     tmp_dir = C.OUTPUT_DIR / ".tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = tmp_dir / f"{filename}.{uuid.uuid4().hex}.part"
+    tmp_path = tmp_dir / f"download_{uuid.uuid4().hex}.part"
     try:
-        tmp_path.write_bytes(content)
+        content_type, final_url = await _stream_public_remote_media_to_path(url, tmp_path)
+        ext = extension_from_response(final_url, content_type, fallback_ext)
+        filename = stable_filename(prefix, url, ext, stable_id=stable_id)
+        final_path = C.OUTPUT_DIR / filename
+        if final_path.exists():
+            tmp_path.unlink(missing_ok=True)
+            return f"{C.PUBLIC_BASE_URL}/generated/{filename}", str(final_path)
         os.replace(str(tmp_path), str(final_path))
     except BaseException:
         try:

@@ -171,6 +171,128 @@ class _AtomicWriteTestBase(unittest.TestCase):
     def _stable_filename(self, url: str, stable_id: str) -> str:
         return stable_filename("image_test", url, ".png", stable_id=stable_id)
 
+    def _stream_response(self, content: bytes, content_type: str, final_url: str):
+        async def _helper(url: str, tmp_path: Path):
+            with tmp_path.open("wb") as fh:
+                fh.write(content)
+            return content_type, final_url
+
+        return _helper
+
+    def _streaming_client_patch(
+        self,
+        *,
+        chunks: list[bytes],
+        content_type: str = "image/png",
+        content_length: int | None = None,
+    ):
+        async def _async_iter_chunks():
+            for chunk in chunks:
+                yield chunk
+
+        def fake_client(**kwargs):
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+
+            fake_response = AsyncMock()
+            fake_response.status_code = 200
+            headers = {"content-type": content_type}
+            if content_length is not None:
+                headers["content-length"] = str(content_length)
+            fake_response.headers = headers
+            fake_response.raise_for_status = lambda: None
+            fake_response.aiter_bytes = MagicMock(return_value=_async_iter_chunks())
+            fake_response.aclose = AsyncMock()
+
+            mock_client.build_request = MagicMock(return_value="fake-request")
+            mock_client.send = AsyncMock(return_value=fake_response)
+            return mock_client
+
+        return patch("angemedia_gateway.media.httpx.AsyncClient", side_effect=fake_client)
+
+
+class StreamingDownloadToPathTest(_AtomicWriteTestBase):
+    def test_download_remote_media_does_not_call_fetch_public_remote_media(self):
+        async def _run():
+            stable_id = "stream-no-fetch"
+            remote_url = "http://example.com/stream-no-fetch.png"
+            expected = self._stable_filename(remote_url, stable_id)
+            final_path = C.OUTPUT_DIR / expected
+
+            with self._streaming_client_patch(chunks=[b"ok"]), \
+                patch("angemedia_gateway.media.validate_public_http_url", return_value=remote_url), \
+                patch(
+                    "angemedia_gateway.media.fetch_public_remote_media",
+                    new_callable=AsyncMock,
+                    side_effect=AssertionError("download_remote_media must stream directly"),
+                ):
+                local_url, local_path = await download_remote_media(
+                    remote_url,
+                    prefix="image_test", fallback_ext=".png", stable_id=stable_id,
+                )
+
+            self.assertEqual(final_path.read_bytes(), b"ok")
+            self.assertEqual(local_path, str(final_path))
+            self.assertEqual(local_url, f"{C.PUBLIC_BASE_URL}/generated/{expected}")
+        asyncio.run(_run())
+
+    def test_download_remote_media_does_not_use_path_write_bytes(self):
+        async def _run():
+            stable_id = "stream-no-write-bytes"
+            remote_url = "http://example.com/stream-no-write-bytes.png"
+            expected = self._stable_filename(remote_url, stable_id)
+            final_path = C.OUTPUT_DIR / expected
+
+            with self._streaming_client_patch(chunks=[b"ok"]), \
+                patch("angemedia_gateway.media.validate_public_http_url", return_value=remote_url), \
+                patch("angemedia_gateway.media.Path.write_bytes", side_effect=AssertionError("write_bytes should not be used")):
+                await download_remote_media(
+                    remote_url,
+                    prefix="image_test", fallback_ext=".png", stable_id=stable_id,
+                )
+
+            self.assertEqual(final_path.read_bytes(), b"ok")
+        asyncio.run(_run())
+
+    def test_multi_chunk_streaming_success(self):
+        async def _run():
+            stable_id = "stream-multi"
+            remote_url = "http://example.com/stream-multi.png"
+            expected = self._stable_filename(remote_url, stable_id)
+            final_path = C.OUTPUT_DIR / expected
+
+            with self._streaming_client_patch(chunks=[b"aa", b"bb", b"cc"]), \
+                patch("angemedia_gateway.media.validate_public_http_url", return_value=remote_url):
+                await download_remote_media(
+                    remote_url,
+                    prefix="image_test", fallback_ext=".png", stable_id=stable_id,
+                )
+
+            self.assertEqual(final_path.read_bytes(), b"aabbcc")
+            self.assertEqual(self._count_tmp_parts(), 0)
+        asyncio.run(_run())
+
+    def test_streaming_over_limit_cleans_part(self):
+        async def _run():
+            stable_id = "stream-over-limit"
+            remote_url = "http://example.com/stream-over-limit.png"
+            expected = self._stable_filename(remote_url, stable_id)
+            final_path = C.OUTPUT_DIR / expected
+
+            with self._streaming_client_patch(chunks=[b"aaa", b"bbb"]), \
+                patch("angemedia_gateway.media.validate_public_http_url", return_value=remote_url), \
+                patch("angemedia_gateway.media.C.MEDIA_DOWNLOAD_MAX_BYTES", 4):
+                with self.assertRaises(RuntimeError):
+                    await download_remote_media(
+                        remote_url,
+                        prefix="image_test", fallback_ext=".png", stable_id=stable_id,
+                    )
+
+            self.assertFalse(final_path.exists())
+            self.assertEqual(self._count_tmp_parts(), 0)
+        asyncio.run(_run())
+
 
 # ── 1. 正常下载 ──────────────────────────────────────────
 
@@ -183,9 +305,8 @@ class AtomicWriteSuccessTest(_AtomicWriteTestBase):
             final_path = C.OUTPUT_DIR / expected
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(content, "image/png", "http://example.com/ok.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(content, "image/png", "http://example.com/ok.png"),
             ):
                 await download_remote_media(
                     "http://example.com/ok.png",
@@ -202,9 +323,8 @@ class AtomicWriteSuccessTest(_AtomicWriteTestBase):
             final_path = C.OUTPUT_DIR / expected
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(content, "image/png", "http://example.com/full.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(content, "image/png", "http://example.com/full.png"),
             ):
                 await download_remote_media(
                     "http://example.com/full.png",
@@ -218,9 +338,8 @@ class AtomicWriteSuccessTest(_AtomicWriteTestBase):
         async def _run():
             stable_id = "success-id-3"
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"data", "image/png", "http://example.com/clean.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"data", "image/png", "http://example.com/clean.png"),
             ):
                 await download_remote_media(
                     "http://example.com/clean.png",
@@ -233,9 +352,8 @@ class AtomicWriteSuccessTest(_AtomicWriteTestBase):
         async def _run():
             stable_id = "success-id-4"
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"data", "image/png", "http://example.com/ret.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"data", "image/png", "http://example.com/ret.png"),
             ):
                 local_url, local_path = await download_remote_media(
                     "http://example.com/ret.png",
@@ -248,15 +366,14 @@ class AtomicWriteSuccessTest(_AtomicWriteTestBase):
         asyncio.run(_run())
 
 
-# ── 2. fetch_public_remote_media 抛异常 ─────────────────
+# ── 2. streaming helper 抛异常 ─────────────────
 
 class AtomicWriteFetchFailureTest(_AtomicWriteTestBase):
     def test_final_file_not_created(self):
         async def _run():
             stable_id = "fetch-fail-1"
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
                 side_effect=RuntimeError("network error"),
             ):
                 with self.assertRaises(RuntimeError):
@@ -272,8 +389,7 @@ class AtomicWriteFetchFailureTest(_AtomicWriteTestBase):
         async def _run():
             stable_id = "fetch-fail-2"
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
                 side_effect=RuntimeError("timeout"),
             ):
                 with self.assertRaises(RuntimeError):
@@ -288,8 +404,7 @@ class AtomicWriteFetchFailureTest(_AtomicWriteTestBase):
         async def _run():
             remote_url = "http://example.com/fallback.png"
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
                 side_effect=RuntimeError("download failed"),
             ):
                 local_url, local_path, error = await try_download_remote_media(
@@ -313,9 +428,8 @@ class AtomicWriteReplaceFailureTest(_AtomicWriteTestBase):
                 raise OSError("permission denied")
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"data", "image/png", "http://example.com/rf1.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"data", "image/png", "http://example.com/rf1.png"),
             ), patch("angemedia_gateway.media.os.replace", side_effect=failing_replace):
                 with self.assertRaises(OSError):
                     await download_remote_media(
@@ -334,9 +448,8 @@ class AtomicWriteReplaceFailureTest(_AtomicWriteTestBase):
                 raise OSError("disk full")
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"data", "image/png", "http://example.com/rf2.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"data", "image/png", "http://example.com/rf2.png"),
             ), patch("angemedia_gateway.media.os.replace", side_effect=failing_replace):
                 with self.assertRaises(OSError):
                     await download_remote_media(
@@ -354,9 +467,8 @@ class AtomicWriteReplaceFailureTest(_AtomicWriteTestBase):
                 raise OSError("I/O error")
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"data", "image/png", remote_url),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"data", "image/png", remote_url),
             ), patch("angemedia_gateway.media.os.replace", side_effect=failing_replace):
                 local_url, local_path, error = await try_download_remote_media(
                     remote_url, prefix="image_test", fallback_ext=".png", stable_id="rfb-1",
@@ -379,9 +491,8 @@ class AtomicWriteExistingFileTest(_AtomicWriteTestBase):
             final_path.write_bytes(original)
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"new content", "image/png", "http://example.com/exist.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"new content", "image/png", "http://example.com/exist.png"),
             ):
                 await download_remote_media(
                     "http://example.com/exist.png",
@@ -390,7 +501,7 @@ class AtomicWriteExistingFileTest(_AtomicWriteTestBase):
             self.assertEqual(final_path.read_bytes(), original)
         asyncio.run(_run())
 
-    def test_no_part_created(self):
+    def test_no_part_residual(self):
         async def _run():
             stable_id = "existing-2"
             expected = self._stable_filename("http://example.com/exist2.png", stable_id)
@@ -398,9 +509,8 @@ class AtomicWriteExistingFileTest(_AtomicWriteTestBase):
             final_path.write_bytes(b"keep")
 
             with patch(
-                "angemedia_gateway.media.fetch_public_remote_media",
-                new_callable=AsyncMock,
-                return_value=(b"new", "image/png", "http://example.com/exist2.png"),
+                "angemedia_gateway.media._stream_public_remote_media_to_path",
+                side_effect=self._stream_response(b"new", "image/png", "http://example.com/exist2.png"),
             ):
                 await download_remote_media(
                     "http://example.com/exist2.png",
