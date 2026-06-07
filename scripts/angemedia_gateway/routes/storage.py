@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from starlette.responses import FileResponse
 
 from .. import config as C
-from ..runtime import ALLOWED_UPLOAD_SUFFIXES, require_admin_auth, uploaded_file_url, write_upload_file_limited
+from ..runtime import ALLOWED_UPLOAD_SUFFIXES, require_admin_auth, require_auth, uploaded_file_url, write_upload_file_limited
 from ..state import (
     clear_generations,
     clear_generations_and_collect_files,
@@ -28,6 +29,28 @@ from ..state import (
 )
 
 router = APIRouter()
+
+
+def _resolve_file_under(base_dir: Path, filename: str) -> Path:
+    """安全解析文件路径，防止路径穿越。"""
+    resolved = (base_dir / filename).resolve()
+    if not resolved.is_relative_to(base_dir.resolve()):
+        raise HTTPException(status_code=400, detail="路径非法")
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return resolved
+
+
+@router.get("/generated/{filename:path}", dependencies=[Depends(require_auth)])
+async def serve_generated_file(filename: str) -> FileResponse:
+    """鉴权访问 /generated/ 下的文件。"""
+    return FileResponse(_resolve_file_under(C.OUTPUT_DIR, filename))
+
+
+@router.get("/uploads/{filename:path}", dependencies=[Depends(require_auth)])
+async def serve_upload_file(filename: str) -> FileResponse:
+    """鉴权访问 /uploads/ 下的文件。"""
+    return FileResponse(_resolve_file_under(C.UPLOAD_DIR, filename))
 
 
 @router.get("/v1/generated-files/orphans", dependencies=[Depends(require_admin_auth)])

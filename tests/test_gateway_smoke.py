@@ -20,6 +20,7 @@ os.environ.setdefault("ADMIN_DEFAULT_PASSWORD", "admin123456")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from angemedia_gateway.server import app  # noqa: E402
+import angemedia_gateway.config as C  # noqa: E402
 
 
 class GatewaySmokeTest(unittest.TestCase):
@@ -86,6 +87,120 @@ class GatewaySmokeTest(unittest.TestCase):
         ]
         for field in forbidden:
             self.assertNotIn(field, body, f"/health 不应包含 {field}")
+
+    def test_generated_file_requires_auth(self) -> None:
+        """/generated/{filename} 无鉴权返回 401。"""
+        orig = C.GATEWAY_API_KEY
+        try:
+            C.GATEWAY_API_KEY = "test-key-for-auth"
+            response = self.client.get("/generated/nonexistent.png")
+            self.assertIn(response.status_code, (401, 403))
+        finally:
+            C.GATEWAY_API_KEY = orig
+
+    def test_uploads_file_requires_auth(self) -> None:
+        """/uploads/{filename} 无鉴权返回 401。"""
+        orig = C.GATEWAY_API_KEY
+        try:
+            C.GATEWAY_API_KEY = "test-key-for-auth"
+            response = self.client.get("/uploads/nonexistent.mp4")
+            self.assertIn(response.status_code, (401, 403))
+        finally:
+            C.GATEWAY_API_KEY = orig
+
+    def test_generated_real_file_with_auth_returns_200(self) -> None:
+        """带 auth 访问真实 generated 文件返回 200 且内容正确。"""
+        test_file = C.OUTPUT_DIR / "smoke-test.png"
+        test_content = b"smoke test png content"
+        test_file.write_bytes(test_content)
+        try:
+            self.login_admin()
+            response = self.client.get("/generated/smoke-test.png")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, test_content)
+        finally:
+            test_file.unlink(missing_ok=True)
+
+    def test_uploads_real_file_with_auth_returns_200(self) -> None:
+        """带 auth 访问真实 upload 文件返回 200 且内容正确。"""
+        test_file = C.UPLOAD_DIR / "smoke-test.mp4"
+        test_content = b"smoke test mp4 content"
+        test_file.write_bytes(test_content)
+        try:
+            self.login_admin()
+            response = self.client.get("/uploads/smoke-test.mp4")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content, test_content)
+        finally:
+            test_file.unlink(missing_ok=True)
+
+    def test_generated_nonexistent_returns_404(self) -> None:
+        """访问不存在的 generated 文件返回 404。"""
+        self.login_admin()
+        response = self.client.get("/generated/does-not-exist.png")
+        self.assertEqual(response.status_code, 404)
+
+    def test_uploads_nonexistent_returns_404(self) -> None:
+        """访问不存在的 upload 文件返回 404。"""
+        self.login_admin()
+        response = self.client.get("/uploads/does-not-exist.mp4")
+        self.assertEqual(response.status_code, 404)
+
+    def test_generated_real_file_no_auth_returns_401(self) -> None:
+        """无鉴权访问真实 generated 文件返回 401。"""
+        test_file = C.OUTPUT_DIR / "no-auth-test.png"
+        test_content = b"no auth content"
+        test_file.write_bytes(test_content)
+        try:
+            orig = C.GATEWAY_API_KEY
+            try:
+                C.GATEWAY_API_KEY = "test-key-for-auth"
+                response = self.client.get("/generated/no-auth-test.png")
+                self.assertIn(response.status_code, (401, 403))
+            finally:
+                C.GATEWAY_API_KEY = orig
+        finally:
+            test_file.unlink(missing_ok=True)
+
+    def test_uploads_real_file_no_auth_returns_401(self) -> None:
+        """无鉴权访问真实 upload 文件返回 401。"""
+        test_file = C.UPLOAD_DIR / "no-auth-test.mp4"
+        test_content = b"no auth upload"
+        test_file.write_bytes(test_content)
+        try:
+            orig = C.GATEWAY_API_KEY
+            try:
+                C.GATEWAY_API_KEY = "test-key-for-auth"
+                response = self.client.get("/uploads/no-auth-test.mp4")
+                self.assertIn(response.status_code, (401, 403))
+            finally:
+                C.GATEWAY_API_KEY = orig
+        finally:
+            test_file.unlink(missing_ok=True)
+
+    def test_path_traversal_blocked(self) -> None:
+        """/generated/../xxx 路径穿越被阻止。"""
+        self.login_admin()
+        response = self.client.get("/generated/../etc/passwd")
+        self.assertIn(response.status_code, (400, 403, 404))
+
+    def test_path_traversal_uploads_blocked(self) -> None:
+        """/uploads/../xxx 路径穿越被阻止。"""
+        self.login_admin()
+        response = self.client.get("/uploads/../etc/passwd")
+        self.assertIn(response.status_code, (400, 403, 404))
+
+    def test_path_traversal_encoded_blocked(self) -> None:
+        """/generated/%2e%2e/xxx URL 编码路径穿越被阻止。"""
+        self.login_admin()
+        response = self.client.get("/generated/%2e%2e/etc/passwd")
+        self.assertIn(response.status_code, (400, 403, 404))
+
+    def test_path_traversal_uploads_encoded_blocked(self) -> None:
+        """/uploads/%2e%2e/xxx URL 编码路径穿越被阻止。"""
+        self.login_admin()
+        response = self.client.get("/uploads/%2e%2e/etc/passwd")
+        self.assertIn(response.status_code, (400, 403, 404))
 
 
 if __name__ == "__main__":

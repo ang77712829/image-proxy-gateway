@@ -11,8 +11,6 @@ from .routes.media import create_image, create_video, get_video
 from .runtime import refresh_runtime, require_auth
 
 app = FastAPI(title="AngeMedia Gateway", version="v0.1.0")
-app.mount("/generated", StaticFiles(directory=str(C.OUTPUT_DIR)), name="generated")
-app.mount("/uploads", StaticFiles(directory=str(C.UPLOAD_DIR)), name="uploads")
 if C.FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(C.FRONTEND_DIR / "assets")), name="assets")
 
