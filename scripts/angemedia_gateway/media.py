@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import logging
 import mimetypes
@@ -114,6 +115,56 @@ def cleanup_controlled_download_tmp_dir() -> dict[str, int]:
         else:
             result["copying_removed"] += 1
     return result
+
+
+def verify_download_tmp_os_replace_ready() -> None:
+    """验证 OUTPUT_DIR/.tmp 与 OUTPUT_DIR 在同一文件系统，os.replace 可正常工作。"""
+    tmp_dir = C.OUTPUT_DIR / ".tmp"
+
+    if tmp_dir.is_symlink():
+        raise RuntimeError(
+            "os.replace self-test 失败：.tmp 是符号链接，不允许使用。"
+            "请删除该符号链接并确保 OUTPUT_DIR/.tmp 是普通目录。"
+            f"OUTPUT_DIR={C.OUTPUT_DIR}"
+        )
+
+    if tmp_dir.exists() and not tmp_dir.is_dir():
+        raise RuntimeError(
+            "os.replace self-test 失败：.tmp 是普通文件而非目录。"
+            "请删除该文件。"
+            f"OUTPUT_DIR={C.OUTPUT_DIR}"
+        )
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    token = uuid.uuid4().hex
+    test_tmp = tmp_dir / f"samefs_{token}.tmp"
+    test_final = C.OUTPUT_DIR / f"samefs_{token}.test"
+    try:
+        test_tmp.write_bytes(b"same-filesystem-test")
+        try:
+            os.replace(str(test_tmp), str(test_final))
+        except OSError as exc:
+            if exc.errno == errno.EXDEV:
+                raise RuntimeError(
+                    "os.replace self-test 失败（EXDEV）：OUTPUT_DIR 和 .tmp 不在同一文件系统，"
+                    "os.replace 无法跨设备执行。请检查 Docker volume 挂载或 bind mount 配置，"
+                    "确保 OUTPUT_DIR 内部不跨设备。"
+                    f"OUTPUT_DIR={C.OUTPUT_DIR}"
+                ) from exc
+            raise RuntimeError(
+                f"os.replace self-test 失败：errno={exc.errno}, {exc}。"
+                f"OUTPUT_DIR={C.OUTPUT_DIR}, tmp_dir={tmp_dir}"
+            ) from exc
+    finally:
+        try:
+            test_final.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            test_tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 async def fetch_public_remote_media(url: str) -> tuple[bytes, str, str]:

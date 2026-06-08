@@ -25,6 +25,7 @@ from angemedia_gateway.media import (
     extension_from_response,
     stable_filename,
     try_download_remote_media,
+    verify_download_tmp_os_replace_ready,
 )
 from angemedia_gateway.state import (
     generation_metadata_by_filename,
@@ -270,6 +271,102 @@ class RuntimeStartupCleanupWiringTest(unittest.TestCase):
 
         self.assertIn("from .media import cleanup_controlled_download_tmp_dir", runtime_source)
         self.assertIn("cleanup_controlled_download_tmp_dir()", runtime_source)
+
+    def test_runtime_invokes_same_filesystem_self_test(self):
+        runtime_source = (ROOT / "scripts" / "angemedia_gateway" / "runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn("verify_download_tmp_os_replace_ready", runtime_source)
+        self.assertIn("verify_download_tmp_os_replace_ready()", runtime_source)
+        cleanup_pos = runtime_source.index("cleanup_controlled_download_tmp_dir()")
+        selftest_pos = runtime_source.index("verify_download_tmp_os_replace_ready()")
+        init_db_pos = runtime_source.index("init_db()")
+        self.assertLess(cleanup_pos, selftest_pos)
+        self.assertLess(selftest_pos, init_db_pos)
+
+
+class SameFilesystemSelfTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp_dir = tempfile.mkdtemp(prefix="samefs-test-")
+        self._orig_output_dir = C.OUTPUT_DIR
+        C.OUTPUT_DIR = Path(self._tmp_dir) / "output"
+        C.OUTPUT_DIR.mkdir()
+
+    def tearDown(self):
+        C.OUTPUT_DIR = self._orig_output_dir
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def test_success_no_exception_no_residual(self):
+        verify_download_tmp_os_replace_ready()
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        self.assertTrue(tmp_dir.is_dir())
+        self.assertEqual(len(list(tmp_dir.glob("samefs_*.tmp"))), 0)
+        self.assertEqual(len(list(C.OUTPUT_DIR.glob("samefs_*.test"))), 0)
+
+    def test_real_file_not_deleted(self):
+        real_file = C.OUTPUT_DIR / "real_asset.png"
+        real_file.write_bytes(b"real")
+        verify_download_tmp_os_replace_ready()
+        self.assertTrue(real_file.exists())
+        self.assertEqual(real_file.read_bytes(), b"real")
+
+    def test_exdev_raises_runtime_error(self):
+        import errno as errno_mod
+
+        def failing_replace(src, dst):
+            raise OSError(errno_mod.EXDEV, "Invalid cross-device link")
+
+        with patch("angemedia_gateway.media.os.replace", side_effect=failing_replace):
+            with self.assertRaises(RuntimeError) as ctx:
+                verify_download_tmp_os_replace_ready()
+            msg = str(ctx.exception)
+            self.assertIn("EXDEV", msg)
+            self.assertIn("OUTPUT_DIR", msg)
+            self.assertIn(".tmp", msg)
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        self.assertEqual(len(list(tmp_dir.glob("samefs_*.tmp"))), 0)
+        self.assertEqual(len(list(C.OUTPUT_DIR.glob("samefs_*.test"))), 0)
+
+    def test_other_oserror_raises_runtime_error(self):
+        import errno as errno_mod
+
+        def failing_replace(src, dst):
+            raise OSError(errno_mod.EIO, "I/O error")
+
+        with patch("angemedia_gateway.media.os.replace", side_effect=failing_replace):
+            with self.assertRaises(RuntimeError) as ctx:
+                verify_download_tmp_os_replace_ready()
+            msg = str(ctx.exception)
+            self.assertIn("errno=", msg)
+            self.assertIn("OUTPUT_DIR", msg)
+            self.assertIn(".tmp", msg)
+        tmp_dir = C.OUTPUT_DIR / ".tmp"
+        self.assertEqual(len(list(tmp_dir.glob("samefs_*.tmp"))), 0)
+        self.assertEqual(len(list(C.OUTPUT_DIR.glob("samefs_*.test"))), 0)
+
+    def test_tmp_symlink_raises_runtime_error(self):
+        target_dir = C.OUTPUT_DIR / "target"
+        target_dir.mkdir()
+        (target_dir / "keep.txt").write_bytes(b"keep")
+        tmp_path = C.OUTPUT_DIR / ".tmp"
+        try:
+            tmp_path.symlink_to(target_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink unavailable: {exc}")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            verify_download_tmp_os_replace_ready()
+        self.assertIn(".tmp", str(ctx.exception))
+        self.assertTrue((target_dir / "keep.txt").exists())
+
+    def test_tmp_is_regular_file_raises_runtime_error(self):
+        tmp_path = C.OUTPUT_DIR / ".tmp"
+        tmp_path.write_text("not a directory")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            verify_download_tmp_os_replace_ready()
+        self.assertIn(".tmp", str(ctx.exception))
+        self.assertTrue(tmp_path.exists())
+        self.assertTrue(tmp_path.is_file())
 
 
 class _AtomicWriteTestBase(unittest.TestCase):
