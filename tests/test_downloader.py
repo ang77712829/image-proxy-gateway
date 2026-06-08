@@ -827,3 +827,24 @@ class SendPublicGetRedirectTest(unittest.TestCase):
                 await _send_public_get(client, "https://example.com/start.png")
             self.assertIn("缺少 Location", str(ctx.exception))
         asyncio.run(_run())
+
+
+class RemoteMediaClientProxyIsolationTest(unittest.TestCase):
+    """确认远程媒体下载 client 不读取代理环境变量。"""
+
+    def test_remote_media_http_client_trust_env_false(self):
+        import httpx as httpx_mod
+        from angemedia_gateway.media import _remote_media_http_client
+        captured = {}
+
+        original_init = httpx_mod.AsyncClient.__init__
+
+        def capturing_init(self_client, **kwargs):
+            captured.update(kwargs)
+            original_init(self_client, **kwargs)
+
+        with patch.object(httpx_mod.AsyncClient, "__init__", capturing_init):
+            _remote_media_http_client()
+
+        self.assertIn("trust_env", captured)
+        self.assertFalse(captured["trust_env"])

@@ -65,7 +65,7 @@ def _remote_media_http_client() -> httpx.AsyncClient:
         max_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
         max_keepalive_connections=C.MEDIA_DOWNLOAD_CONCURRENCY,
     )
-    return httpx.AsyncClient(timeout=timeout, limits=limits)
+    return httpx.AsyncClient(timeout=timeout, limits=limits, trust_env=False)
 
 
 def cleanup_controlled_download_tmp_dir() -> dict[str, int]:
