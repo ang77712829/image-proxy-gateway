@@ -39,6 +39,21 @@ const zhCN = {
   'dashboard.error': '错误',
   'dashboard.unavailable': '不可用',
   'dashboard.unknown': '未知',
+
+  // Generate Image
+  'generateImage.title': '生成图片',
+  'generateImage.prompt': '描述要生成的图片',
+  'generateImage.promptPlaceholder': '例如：一只可爱的猫在花园里玩耍',
+  'generateImage.promptRequired': '请输入图片描述',
+  'generateImage.submit': '生成',
+  'generateImage.generating': '生成中...',
+  'generateImage.error': '生成失败',
+  'generateImage.success': '生成成功',
+  'generateImage.previewAlt': '生成的图片',
+  'generateImage.imageUnavailable': '图片已生成，但预览不可用',
+  'generateImage.duration': '耗时',
+  'generateImage.provider': '服务商',
+  'generateImage.model': '模型',
 };
 
 const enUS = {
@@ -75,6 +90,21 @@ const enUS = {
   'dashboard.error': 'error',
   'dashboard.unavailable': 'unavailable',
   'dashboard.unknown': 'unknown',
+
+  // Generate Image
+  'generateImage.title': 'Generate Image',
+  'generateImage.prompt': 'Describe the image to generate',
+  'generateImage.promptPlaceholder': 'e.g., A cute cat playing in the garden',
+  'generateImage.promptRequired': 'Please enter a prompt',
+  'generateImage.submit': 'Generate',
+  'generateImage.generating': 'Generating...',
+  'generateImage.error': 'Generation failed',
+  'generateImage.success': 'Generation successful',
+  'generateImage.previewAlt': 'Generated image',
+  'generateImage.imageUnavailable': 'Image generated, but preview unavailable',
+  'generateImage.duration': 'Duration',
+  'generateImage.provider': 'Provider',
+  'generateImage.model': 'Model',
 };
 
 const locales = { 'zh-CN': zhCN, 'en-US': enUS };
