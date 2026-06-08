@@ -218,6 +218,14 @@ class GatewaySmokeTest(unittest.TestCase):
         response = self.client.get("/uploads/%2e%2e/etc/passwd")
         self.assertIn(response.status_code, (400, 403, 404))
 
+    def test_legacy_assistant_routes_return_404(self) -> None:
+        """v0.2.0 移除的 legacy assistant/prompt 普通路由返回 404。"""
+        self.login_admin()
+        for path in ["/v1/prompt/enhance", "/v1/assistant/plan", "/v1/assistant/generate"]:
+            with self.subTest(path=path):
+                response = self.client.post(path, json={"prompt": "test"})
+                self.assertEqual(response.status_code, 404, response.text)
+
 
 if __name__ == "__main__":
     unittest.main()

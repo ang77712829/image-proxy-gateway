@@ -1,4 +1,4 @@
-"""媒体生成、模型列表和小助手路由。"""
+"""媒体生成、模型列表路由。"""
 from __future__ import annotations
 
 import logging
@@ -7,10 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import config as C
-from ..assistant import build_assistant_plan
 from ..providers.base import BackendUnavailable, RateLimited
-from ..routing import MODEL_ALIASES, build_route_response, enhance_prompt_text
-from ..schemas import AssistantRequest, EnhanceRequest, ImageRequest, RouteRequest, VideoRequest
+from ..routing import MODEL_ALIASES, build_route_response
+from ..schemas import ImageRequest, RouteRequest, VideoRequest
 from ..security import redact_secret_text
 from ..services.media_service import (
     CustomProviderNotFound,
@@ -21,7 +20,6 @@ from ..services.media_service import (
 )
 from ..state import (
     builtin_provider_enabled,
-    get_config,
     list_custom_providers,
 )
 from ..runtime import require_auth
@@ -93,65 +91,6 @@ async def list_models() -> dict[str, Any]:
 @router.post("/v1/media/route", dependencies=[Depends(require_auth)])
 async def route_media(req: RouteRequest) -> dict[str, Any]:
     return build_route_response(req)
-
-
-@router.post("/v1/prompt/enhance", dependencies=[Depends(require_auth)])
-async def enhance_prompt(req: EnhanceRequest) -> dict[str, Any]:
-    media_type = req.media_type if req.media_type != "auto" else build_route_response(RouteRequest(prompt=req.prompt))["media_type"]
-    enhanced, changed, notes = enhance_prompt_text(req)
-    return {
-        "media_type": media_type,
-        "original_prompt": req.prompt,
-        "enhanced_prompt": enhanced,
-        "changed": changed,
-        "notes": notes,
-    }
-
-
-@router.post("/v1/assistant/plan", dependencies=[Depends(require_auth)])
-async def assistant_plan(req: AssistantRequest) -> dict[str, Any]:
-    try:
-        return await build_assistant_plan(req)
-    except BackendUnavailable as exc:
-        raise HTTPException(status_code=502, detail=redact_secret_text(str(exc))) from exc
-
-
-@router.post("/v1/assistant/generate", dependencies=[Depends(require_auth)])
-async def assistant_generate(req: AssistantRequest) -> dict[str, Any]:
-    try:
-        plan = await build_assistant_plan(req)
-    except BackendUnavailable as exc:
-        raise HTTPException(status_code=502, detail=redact_secret_text(str(exc))) from exc
-    if req.confirm_plan or get_config("ANGE_ASSISTANT_CONFIRM_PLAN", "false").lower() in {"1", "true", "yes", "on"}:
-        return {"requires_confirmation": True, "plan": plan}
-
-    if plan["media_type"] == "video":
-        video_req = VideoRequest(
-            prompt=plan["prompt"],
-            model="agnes-video-v2.0",
-            image=plan.get("image"),
-            images=plan.get("images"),
-            mode=plan.get("mode"),
-            width=int(plan.get("width", 1152)),
-            height=int(plan.get("height", 768)),
-            num_frames=int(plan.get("num_frames", 121)),
-            frame_rate=float(plan.get("frame_rate", 24)),
-            wait_for_completion=bool(plan.get("wait_for_completion", req.wait_for_completion)),
-        )
-        result = await _create_video_response(video_req)
-        result["assistant_plan"] = plan
-        return result
-
-    image_req = ImageRequest(
-        prompt=plan["prompt"],
-        model=plan.get("model"),
-        size=plan.get("size", "1024x1024"),
-        response_format="url",
-        negative_prompt=plan.get("negative_prompt"),
-    )
-    result = await _create_image_response(image_req)
-    result["assistant_plan"] = plan
-    return result
 
 
 @router.post("/v1/images/generations", dependencies=[Depends(require_auth)])
