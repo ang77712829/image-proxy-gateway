@@ -54,6 +54,28 @@ const zhCN = {
   'generateImage.duration': '耗时',
   'generateImage.provider': '服务商',
   'generateImage.model': '模型',
+
+  // Jobs
+  'jobs.title': '任务',
+  'jobs.loading': '加载中...',
+  'jobs.empty': '暂无任务',
+  'jobs.error': '加载任务失败',
+  'jobs.id': 'ID',
+  'jobs.kind': '类型',
+  'jobs.status': '状态',
+  'jobs.created': '创建时间',
+  'jobs.duration': '耗时',
+  'jobs.provider': '服务商',
+  'jobs.model': '模型',
+  'jobs.errorCode': '错误码',
+  'jobs.image': '图片',
+  'jobs.video': '视频',
+  'jobs.unknown': '未知',
+  'jobs.queued': '排队中',
+  'jobs.running': '运行中',
+  'jobs.succeeded': '成功',
+  'jobs.failed': '失败',
+  'jobs.canceled': '已取消',
 };
 
 const enUS = {
@@ -105,6 +127,28 @@ const enUS = {
   'generateImage.duration': 'Duration',
   'generateImage.provider': 'Provider',
   'generateImage.model': 'Model',
+
+  // Jobs
+  'jobs.title': 'Jobs',
+  'jobs.loading': 'Loading...',
+  'jobs.empty': 'No jobs',
+  'jobs.error': 'Failed to load jobs',
+  'jobs.id': 'ID',
+  'jobs.kind': 'Type',
+  'jobs.status': 'Status',
+  'jobs.created': 'Created',
+  'jobs.duration': 'Duration',
+  'jobs.provider': 'Provider',
+  'jobs.model': 'Model',
+  'jobs.errorCode': 'Error Code',
+  'jobs.image': 'Image',
+  'jobs.video': 'Video',
+  'jobs.unknown': 'Unknown',
+  'jobs.queued': 'Queued',
+  'jobs.running': 'Running',
+  'jobs.succeeded': 'Succeeded',
+  'jobs.failed': 'Failed',
+  'jobs.canceled': 'Canceled',
 };
 
 const locales = { 'zh-CN': zhCN, 'en-US': enUS };
