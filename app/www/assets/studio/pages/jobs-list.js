@@ -31,7 +31,7 @@ export async function render() {
 
   const loading = document.createElement('p');
   loading.textContent = t('jobs.loading');
-  loading.style.color = '#888';
+  loading.className = 'text-muted';
   card.appendChild(loading);
 
   content.appendChild(card);
@@ -45,14 +45,13 @@ export async function render() {
     if (jobs.length === 0) {
       const empty = document.createElement('p');
       empty.textContent = t('jobs.empty');
-      empty.style.color = '#888';
+      empty.className = 'text-muted';
       card.appendChild(empty);
       return;
     }
 
     const table = document.createElement('table');
-    table.style.width = '100%';
-    table.style.borderCollapse = 'collapse';
+    table.className = 'data-table';
 
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
@@ -69,10 +68,6 @@ export async function render() {
     headers.forEach(text => {
       const th = document.createElement('th');
       th.textContent = text;
-      th.style.textAlign = 'left';
-      th.style.padding = '8px';
-      th.style.borderBottom = '2px solid #ddd';
-      th.style.fontWeight = '600';
       headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
@@ -81,12 +76,10 @@ export async function render() {
     const tbody = document.createElement('tbody');
     jobs.forEach(job => {
       const row = document.createElement('tr');
-      row.style.borderBottom = '1px solid #eee';
 
       // ID (前8位)
       const tdId = document.createElement('td');
       tdId.textContent = job.id ? job.id.substring(0, 8) : '-';
-      tdId.style.padding = '8px';
       row.appendChild(tdId);
 
       // Kind
@@ -94,45 +87,38 @@ export async function render() {
       tdKind.textContent = job.kind === 'image' ? t('jobs.image') :
                           job.kind === 'video' ? t('jobs.video') :
                           job.kind || t('jobs.unknown');
-      tdKind.style.padding = '8px';
       row.appendChild(tdKind);
 
       // Status
       const tdStatus = document.createElement('td');
       const statusKey = `jobs.${job.status}`;
       tdStatus.textContent = t(statusKey) !== statusKey ? t(statusKey) : job.status || '-';
-      tdStatus.style.padding = '8px';
       row.appendChild(tdStatus);
 
       // Created
       const tdCreated = document.createElement('td');
       tdCreated.textContent = formatDate(job.created_at);
-      tdCreated.style.padding = '8px';
       row.appendChild(tdCreated);
 
       // Duration
       const tdDuration = document.createElement('td');
       tdDuration.textContent = formatDuration(job.duration_ms);
-      tdDuration.style.padding = '8px';
       row.appendChild(tdDuration);
 
       // Provider
       const tdProvider = document.createElement('td');
       tdProvider.textContent = job.provider || '-';
-      tdProvider.style.padding = '8px';
       row.appendChild(tdProvider);
 
       // Model
       const tdModel = document.createElement('td');
       tdModel.textContent = job.model || '-';
-      tdModel.style.padding = '8px';
       row.appendChild(tdModel);
 
       // Error Code
       const tdError = document.createElement('td');
       tdError.textContent = job.error_code || '-';
-      tdError.style.padding = '8px';
-      tdError.style.color = job.error_code ? '#e74c3c' : 'inherit';
+      if (job.error_code) tdError.className = 'text-danger';
       row.appendChild(tdError);
 
       tbody.appendChild(row);
@@ -145,21 +131,18 @@ export async function render() {
     const errorJobs = jobs.filter(j => j.error_message);
     if (errorJobs.length > 0) {
       const errorSection = document.createElement('div');
-      errorSection.style.marginTop = '16px';
-      errorSection.style.fontSize = '12px';
-      errorSection.style.color = '#888';
+      errorSection.className = 'meta-row error-summary';
 
       const errorTitle = document.createElement('p');
       errorTitle.textContent = `${t('jobs.error')}:`;
-      errorTitle.style.fontWeight = '600';
-      errorTitle.style.marginBottom = '4px';
+      errorTitle.className = 'meta-title';
       errorSection.appendChild(errorTitle);
 
       errorJobs.slice(0, 3).forEach(job => {
         const errorP = document.createElement('p');
         // 不展示完整响应，只展示截断的错误消息
         errorP.textContent = `[${job.id?.substring(0, 8) || '-'}] ${truncate(job.error_message, 120)}`;
-        errorP.style.margin = '2px 0';
+        errorP.className = 'error-summary-line';
         errorSection.appendChild(errorP);
       });
 

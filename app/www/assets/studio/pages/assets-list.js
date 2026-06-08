@@ -32,9 +32,7 @@ function isImageAsset(asset) {
 function createPreviewFallback() {
   const fallback = document.createElement('p');
   fallback.textContent = t('assets.unavailable');
-  fallback.style.color = '#888';
-  fallback.style.fontStyle = 'italic';
-  fallback.style.fontSize = '12px';
+  fallback.className = 'preview-fallback';
   return fallback;
 }
 
@@ -51,7 +49,7 @@ export async function render() {
 
   const loading = document.createElement('p');
   loading.textContent = t('assets.loading');
-  loading.style.color = '#888';
+  loading.className = 'text-muted';
   card.appendChild(loading);
 
   content.appendChild(card);
@@ -66,20 +64,17 @@ export async function render() {
     if (assets.length === 0) {
       const empty = document.createElement('p');
       empty.textContent = t('assets.empty');
-      empty.style.color = '#888';
+      empty.className = 'text-muted';
       card.appendChild(empty);
       return;
     }
 
     const list = document.createElement('div');
-    list.style.display = 'grid';
-    list.style.gridTemplateColumns = 'repeat(auto-fill, minmax(250px, 1fr))';
-    list.style.gap = '16px';
+    list.className = 'data-grid';
 
     assets.forEach(asset => {
       const item = document.createElement('div');
-      item.className = 'card';
-      item.style.padding = '12px';
+      item.className = 'card data-card';
 
       // 缩略图预览（安全校验 + 加载失败 fallback）
       if (isImageAsset(asset) && asset.url_path) {
@@ -89,11 +84,7 @@ export async function render() {
           const img = document.createElement('img');
           img.src = asset.url_path;
           img.alt = asset.filename || t('assets.preview');
-          img.style.maxWidth = '100%';
-          img.style.maxHeight = '150px';
-          img.style.borderRadius = '4px';
-          img.style.marginBottom = '8px';
-          img.style.objectFit = 'contain';
+          img.className = 'preview-image';
 
           // 图片加载失败时：移除 img，显示 fallback
           img.addEventListener('error', () => {
@@ -114,15 +105,12 @@ export async function render() {
       // Filename
       const filename = document.createElement('p');
       filename.textContent = asset.filename || '-';
-      filename.style.fontWeight = '600';
-      filename.style.marginBottom = '4px';
-      filename.style.wordBreak = 'break-all';
+      filename.className = 'asset-filename';
       item.appendChild(filename);
 
       // Metadata row
       const meta = document.createElement('div');
-      meta.style.fontSize = '12px';
-      meta.style.color = '#666';
+      meta.className = 'meta-row';
 
       const typeKey = `assets.${asset.media_type}`;
       const typeText = t(typeKey) !== typeKey ? t(typeKey) : asset.media_type || t('assets.unknown');
@@ -142,7 +130,7 @@ export async function render() {
 
       const metaText = document.createElement('p');
       metaText.textContent = fields.join(' | ');
-      metaText.style.margin = '2px 0';
+      metaText.className = 'meta-line';
       meta.appendChild(metaText);
 
       item.appendChild(meta);
