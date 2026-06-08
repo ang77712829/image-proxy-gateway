@@ -76,6 +76,25 @@ const zhCN = {
   'jobs.succeeded': '成功',
   'jobs.failed': '失败',
   'jobs.canceled': '已取消',
+
+  // Assets
+  'assets.title': '资产',
+  'assets.loading': '加载中...',
+  'assets.empty': '暂无资产',
+  'assets.error': '加载资产失败',
+  'assets.filename': '文件名',
+  'assets.type': '类型',
+  'assets.created': '创建时间',
+  'assets.jobId': '任务 ID',
+  'assets.size': '大小',
+  'assets.source': '来源',
+  'assets.preview': '预览',
+  'assets.unavailable': '不可预览',
+  'assets.image': '图片',
+  'assets.video': '视频',
+  'assets.unknown': '未知',
+  'assets.generated': '生成',
+  'assets.upload': '上传',
 };
 
 const enUS = {
@@ -149,6 +168,25 @@ const enUS = {
   'jobs.succeeded': 'Succeeded',
   'jobs.failed': 'Failed',
   'jobs.canceled': 'Canceled',
+
+  // Assets
+  'assets.title': 'Assets',
+  'assets.loading': 'Loading...',
+  'assets.empty': 'No assets',
+  'assets.error': 'Failed to load assets',
+  'assets.filename': 'Filename',
+  'assets.type': 'Type',
+  'assets.created': 'Created',
+  'assets.jobId': 'Job ID',
+  'assets.size': 'Size',
+  'assets.source': 'Source',
+  'assets.preview': 'Preview',
+  'assets.unavailable': 'Preview unavailable',
+  'assets.image': 'Image',
+  'assets.video': 'Video',
+  'assets.unknown': 'Unknown',
+  'assets.generated': 'Generated',
+  'assets.upload': 'Upload',
 };
 
 const locales = { 'zh-CN': zhCN, 'en-US': enUS };
