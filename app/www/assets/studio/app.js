@@ -1,5 +1,7 @@
 import { renderShell, setChromeVisible, guard } from './layout.js';
 import * as router from './router.js';
+import { clearSession } from './auth.js';
+import { setUnauthorizedHandler } from './api.js';
 import { render as renderLogin } from './pages/login.js';
 import { render as renderDashboard } from './pages/dashboard.js';
 import { render as renderGenImage } from './pages/generate-image.js';
@@ -44,6 +46,12 @@ async function notFound() {
   setChromeVisible(true);
   content().innerHTML = '<div class="card"><h2>404 Not Found</h2><p>The page you requested does not exist.</p></div>';
 }
+
+setUnauthorizedHandler(() => {
+  clearSession();
+  setChromeVisible(false);
+  location.hash = '#/login';
+});
 
 router.register('#/login',           wrapLogin(renderLogin));
 router.register('#/dashboard',       wrapAuth(renderDashboard));

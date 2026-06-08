@@ -15,14 +15,17 @@ export async function render() {
             <input id="login-pass" type="password" autocomplete="current-password" required>
           </label>
           <div id="login-error" class="error-text" hidden></div>
-          <button class="btn btn-primary" type="submit">Login</button>
+          <button id="login-btn" class="btn btn-primary" type="submit">Login</button>
         </form>
       </div>
     </div>`;
   document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-btn');
     errEl.hidden = true;
+    btn.disabled = true;
+    btn.textContent = 'Logging in...';
     try {
       await login(
         document.getElementById('login-user').value,
@@ -32,6 +35,8 @@ export async function render() {
     } catch (err) {
       errEl.textContent = err.message || 'Login failed';
       errEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Login';
     }
   });
 }

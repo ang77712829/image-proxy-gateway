@@ -3,7 +3,7 @@ import { api } from './api.js';
 let session = null;
 
 export async function login(username, password) {
-  const res = await api.post('/admin/login', { username, password });
+  const res = await api.post('/admin/login', { username, password }, true);
   session = { authenticated: true, username: res.username };
   return res;
 }
