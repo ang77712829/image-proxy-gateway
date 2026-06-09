@@ -48,19 +48,13 @@ POST /v1/videos
 GET  /v1/videos/{task_id}
 ```
 
-路由和提示词增强：
+路由：
 
 ```text
 POST /v1/media/route
-POST /v1/prompt/enhance
 ```
 
-Ange 小助手，可选：
-
-```text
-POST /v1/assistant/plan
-POST /v1/assistant/generate
-```
+提示词整理由 Agent 在调用生成接口前完成；当前 v0.2.0 Skill 不依赖普通提示词增强或小助手生成路由。
 
 如果配置了 `GATEWAY_API_KEY`，请求要带：
 

@@ -26,8 +26,7 @@ Stable local /generated/ URL
 - Video task endpoints: `POST /v1/videos`, `GET /v1/videos/{task_id}`
 - Built-in media localization: temporary remote URLs are downloaded into `/generated/`
 - Lightweight route API: `POST /v1/media/route`
-- Lightweight prompt enhancement API: `POST /v1/prompt/enhance`
-- Agent Skill docs for image/video generation, routing, and prompt enhancement
+- Agent Skill docs for image/video generation, routing, and prompt guidance
 - Built-in AngeMedia Studio web UI at `/`
 
 ## Default image chain
@@ -131,7 +130,7 @@ curl -X POST http://localhost:9890/v1/media/route \
 - Image generation: `docs/SKILL_IMAGE_GENERATION.md`
 - Video generation: `docs/SKILL_VIDEO_GENERATION.md`
 - Routing: `docs/SKILL_MEDIA_ROUTING.md`
-- Prompt enhancement: `docs/SKILL_PROMPT_ENHANCEMENT.md`
+- Prompt guidance: `docs/SKILL_PROMPT_ENHANCEMENT.md`
 - Agnes examples: `docs/AGNES_MODEL_CALL_EXAMPLES.md`
 
 ## Web Studio
