@@ -1,6 +1,10 @@
 import { api } from '../api.js';
 import { t } from '../i18n.js';
 
+const DEFAULT_PROVIDER_VALUE = '';
+const CUSTOM_PROVIDER_TYPE = 'openai_image';
+const IMAGE_SIZES = ['1024x1024', '1024x1536', '1536x1024'];
+
 // 安全校验：只允许同源图片 URL
 function isSafeImageUrl(url) {
   try {
@@ -12,6 +16,86 @@ function isSafeImageUrl(url) {
   } catch (_) {
     return false;
   }
+}
+
+function createField(labelText, control) {
+  const label = document.createElement('label');
+  label.className = 'field-label form-field';
+  label.textContent = labelText;
+  label.appendChild(control);
+  return label;
+}
+
+function createSizeSelect() {
+  const select = document.createElement('select');
+  select.className = 'form-control';
+  select.name = 'size';
+  IMAGE_SIZES.forEach(size => {
+    const option = document.createElement('option');
+    option.value = size;
+    option.textContent = size;
+    select.appendChild(option);
+  });
+  select.value = '1024x1024';
+  return select;
+}
+
+function createProviderSelect() {
+  const select = document.createElement('select');
+  select.className = 'form-control';
+  select.name = 'provider';
+
+  const option = document.createElement('option');
+  option.value = DEFAULT_PROVIDER_VALUE;
+  option.textContent = t('generateImage.providerDefault');
+  select.appendChild(option);
+
+  return select;
+}
+
+function providerArrayFromResponse(result) {
+  if (Array.isArray(result?.data)) return result.data;
+  if (Array.isArray(result)) return result;
+  return [];
+}
+
+function isEnabledImageProvider(item) {
+  return Boolean(
+    item &&
+    typeof item === 'object' &&
+    item.enabled === true &&
+    item.provider_type === CUSTOM_PROVIDER_TYPE &&
+    item.id
+  );
+}
+
+function providerOptionText(item) {
+  const name = item.name || item.id;
+  if (item.default_model) {
+    return `${name} (${t('generateImage.model')}: ${item.default_model})`;
+  }
+  return name;
+}
+
+async function loadProviderOptions(select, status) {
+  try {
+    const result = await api.get('/admin/providers');
+    providerArrayFromResponse(result)
+      .filter(isEnabledImageProvider)
+      .forEach(item => {
+        const option = document.createElement('option');
+        option.value = `custom:${item.id}`;
+        option.textContent = providerOptionText(item);
+        select.appendChild(option);
+      });
+  } catch (_) {
+    status.textContent = t('generateImage.providerLoadFailed');
+    status.className = 'text-muted';
+  }
+}
+
+function isDuplicateError(err) {
+  return err?.status === 409 || String(err?.message || '').includes('duplicate_in_flight_job');
 }
 
 export async function render() {
@@ -40,6 +124,15 @@ export async function render() {
   promptLabel.appendChild(promptInput);
   card.appendChild(promptLabel);
 
+  const providerSelect = createProviderSelect();
+  const providerStatus = document.createElement('p');
+  providerStatus.className = 'text-muted';
+  card.appendChild(createField(t('generateImage.provider'), providerSelect));
+  card.appendChild(providerStatus);
+
+  const sizeSelect = createSizeSelect();
+  card.appendChild(createField(t('generateImage.size'), sizeSelect));
+
   const actions = document.createElement('div');
   actions.className = 'form-actions';
   const submitBtn = document.createElement('button');
@@ -53,6 +146,8 @@ export async function render() {
   card.appendChild(statusDiv);
 
   content.appendChild(card);
+
+  await loadProviderOptions(providerSelect, providerStatus);
 
   submitBtn.addEventListener('click', async () => {
     const prompt = promptInput.value.trim();
@@ -72,10 +167,17 @@ export async function render() {
     statusDiv.textContent = '';
 
     try {
-      const result = await api.post('/images/generations', {
+      const payload = {
         prompt,
         response_format: 'url',
-      });
+        size: sizeSelect.value || '1024x1024',
+      };
+
+      if (providerSelect.value && providerSelect.value.startsWith('custom:')) {
+        payload.model = providerSelect.value;
+      }
+
+      const result = await api.post('/images/generations', payload);
 
       const successText = document.createElement('p');
       successText.textContent = t('generateImage.success');
@@ -111,7 +213,7 @@ export async function render() {
     } catch (err) {
       // 只显示通用错误，不暴露后端细节
       const errorText = document.createElement('p');
-      errorText.textContent = t('generateImage.error');
+      errorText.textContent = isDuplicateError(err) ? t('generateImage.duplicate') : t('generateImage.error');
       errorText.className = 'error-text';
       statusDiv.appendChild(errorText);
     } finally {
