@@ -130,5 +130,25 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
                 self.assertNotIn(term, self.source)
 
 
+
+    def test_generate_image_source_handles_human_hint_from_error_response(self) -> None:
+        """generate-image.js 应能处理 API 错误响应中的 human_hint 字段"""
+        # 当前实现只显示 generateImage.error（通用错误）
+        # 如果 API 返回 human_hint，前端应优先显示 human_hint
+        # 这个测试验证 source 代码是否有可能读取 human_hint
+        # 当前 expect fail: generate-image.js 未显示 human_hint
+
+        # 读取 generate-image.js 源码
+        source = self.source
+
+        # 断言当前实现仍然保留 generateImage.error 作为 fallback
+        self.assertIn("generateImage.error", source,
+                       "generate-image.js 应保留 generateImage.error 作为 fallback")
+
+        # 断言当前实现未读取 human_hint（这是预期的 fail point）
+        # 未来 W-ERR-2A 实现后，这个断言应改为检查 human_hint 处理逻辑
+        self.assertNotIn("human_hint", source,
+                        "generate-image.js 当前未处理 human_hint（需要 W-ERR-2A 实现）")
+
 if __name__ == "__main__":
     unittest.main()

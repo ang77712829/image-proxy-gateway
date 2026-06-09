@@ -11,6 +11,7 @@ from ..providers.base import BackendUnavailable, RateLimited
 from ..routing import MODEL_ALIASES, build_route_response
 from ..schemas import ImageRequest, RouteRequest, VideoRequest
 from ..security import redact_secret_text
+from ..error_diagnostics import classify_provider_error
 from ..services.media_service import (
     CustomProviderNotFound,
     ImageProvidersFailed,
@@ -39,7 +40,19 @@ async def _create_image_response(req: ImageRequest) -> dict[str, Any]:
     except RateLimited as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ImageProvidersFailed as exc:
-        raise HTTPException(status_code=502, detail={"message": "all image providers failed", "errors": exc.errors}) from exc
+        # Classify error from collected provider errors
+        error_msg = redact_secret_text("; ".join(exc.errors))[:500]
+        classification = classify_provider_error(error_msg)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "all image providers failed",
+                "error_category": classification["error_category"],
+                "human_hint": classification["human_hint"],
+                "retryable": classification["retryable"],
+                "gateway_stage": classification["gateway_stage"],
+            }
+        ) from exc
     except BackendUnavailable as exc:
         raise HTTPException(status_code=502, detail=redact_secret_text(str(exc))) from exc
 

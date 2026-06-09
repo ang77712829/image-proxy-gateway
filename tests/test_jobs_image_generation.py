@@ -833,3 +833,80 @@ class WErr1ASanitizedErrorContractTest(_ImageJobTestBase):
         row = conn.execute("SELECT error_message FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
         self.assertNotIn("sk-test-secret-12345", row["error_message"])
         self.assertNotIn("am-leaked-token", row["error_message"])
+
+
+
+class WErr2AResponseContractTest(_ImageJobTestBase):
+    """W-ERR-2A: 验证 POST /v1/images/generations 502 response 结构化合同"""
+
+    def test_502_response_includes_structured_error_fields(self) -> None:
+        """502 response 必须包含 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+        from fastapi.testclient import TestClient
+        from angemedia_gateway.server import app
+        from angemedia_gateway.state import create_gateway_api_key
+
+        class ModelDisabledProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("30003 Model disabled")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": ModelDisabledProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        key_item = create_gateway_api_key(name="test")
+        client = TestClient(app)
+        resp = client.post("/v1/images/generations", json={"prompt": "test"},
+                           headers={"Authorization": f"Bearer {key_item["key"]}"})
+        self.assertEqual(resp.status_code, 502)
+        detail = resp.json().get("detail", {})
+
+        # 断言结构化字段存在于 response
+        self.assertIn("error_category", detail, "502 response 应包含 error_category")
+        self.assertIn("human_hint", detail, "502 response 应包含 human_hint")
+        self.assertIn("retryable", detail, "502 response 应包含 retryable")
+        self.assertIn("gateway_stage", detail, "502 response 应包含 gateway_stage")
+
+        # 断言不泄露敏感信息
+        detail_str = json.dumps(detail)
+        self.assertNotIn("request_hash", detail_str)
+        self.assertNotIn("request_hash_version", detail_str)
+        self.assertNotIn("input_json", detail_str)
+        self.assertNotIn("output_json", detail_str)
+        self.assertNotIn("api_key", detail_str)
+        self.assertNotIn("base_url", detail_str)
+        self.assertNotIn("status_url", detail_str)
+        self.assertNotIn("quota_url", detail_str)
+
+
+class WErr2ACustomProviderJobContractTest(_ImageJobTestBase):
+    """W-ERR-2A: 验证 custom provider failure 写入结构化 job 错误字段"""
+
+    def test_custom_provider_failure_writes_structured_fields(self) -> None:
+        """custom provider failure 应写入 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class CustomProviderFailure:
+            async def generate(self, req, target):
+                raise RuntimeError("custom provider timeout")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": CustomProviderFailure()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+
+        # 断言结构化字段存在
+        self.assertIn("error_category", row.keys(), "error_category 字段缺失")
+        self.assertIn("human_hint", row.keys(), "human_hint 字段缺失")
+        self.assertIn("retryable", row.keys(), "retryable 字段缺失")
+        self.assertIn("gateway_stage", row.keys(), "gateway_stage 字段缺失")
+
+        # 断言不是旧的 image_generation_failed
+        self.assertNotEqual(row["error_code"], "image_generation_failed",
+                           "custom provider failure 不应使用旧的 image_generation_failed")
