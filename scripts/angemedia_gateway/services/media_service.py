@@ -24,6 +24,7 @@ from ..request_hash_builders import (
 from ..routing import resolve_chain
 from ..schemas import ImageRequest, VideoRequest
 from ..security import redact_secret_text, validate_task_id
+from ..error_diagnostics import classify_provider_error
 from ..state import (
     builtin_provider_enabled,
     create_job,
@@ -145,8 +146,14 @@ def _admission_cutoff_iso() -> str:
 
 
 def _duplicate_detail(job: dict[str, Any]) -> dict[str, Any]:
+    from ..error_diagnostics import classify_duplicate_error
+    classification = classify_duplicate_error()
     return {
         "code": "duplicate_in_flight_job",
+        "error_category": classification["error_category"],
+        "human_hint": classification["human_hint"],
+        "retryable": classification["retryable"],
+        "gateway_stage": classification["gateway_stage"],
         "existing_job": {
             "job_id": job.get("id"),
             "kind": job.get("kind"),
@@ -418,10 +425,17 @@ class MediaService:
 
         if job_id:
             try:
+                # Classify error from collected errors
+                error_msg = redact_secret_text("; ".join(errors))[:500]
+                classification = classify_provider_error(error_msg)
                 update_job_status(
                     job_id, status="failed",
                     error_code="all_providers_failed",
-                    error_message=redact_secret_text("; ".join(errors))[:500],
+                    error_message=error_msg,
+                    error_category=classification["error_category"],
+                    human_hint=classification["human_hint"],
+                    retryable=1 if classification["retryable"] else 0,
+                    gateway_stage=classification["gateway_stage"],
                     completed_at=now_iso(),
                 )
             except Exception:

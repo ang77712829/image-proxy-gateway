@@ -232,6 +232,27 @@ class ImageDedupeAdmissionApiTest(_DedupeAdmissionApiTestBase):
         self.assertEqual(self._count_jobs(), 2)
 
 
+
+    def test_duplicate_in_flight_requires_structured_error_contract(self) -> None:
+        """duplicate response 必须有 error_category / human_hint / retryable / gateway_stage"""
+        payload = {"prompt": "duplicate test", "model": "test", "size": "1024x1024", "seed": 99}
+        existing = self._existing_image_job(status="running", payload=payload)
+
+        resp = self._post_image(payload, CountingImageProvider(fail_on_call=True))
+
+        self.assertEqual(resp.status_code, 409)
+        resp_json = resp.json()
+        detail = resp_json.get("detail", resp_json)
+        self.assertIn("error_category", detail, "error_category 字段缺失")
+        self.assertEqual(detail["error_category"], "duplicate_in_flight")
+        self.assertIn("human_hint", detail, "human_hint 字段缺失")
+        self.assertIn("retryable", detail, "retryable 字段缺失")
+        self.assertTrue(detail["retryable"])
+        self.assertIn("gateway_stage", detail, "gateway_stage 字段缺失")
+        self.assertEqual(detail["gateway_stage"], "dedupe_admission")
+        self.assertNotIn("request_hash", detail)
+        self.assertNotIn("request_hash_version", detail)
+
 class VideoDedupeAdmissionApiTest(_DedupeAdmissionApiTestBase):
     """Video async submit best-effort duplicate admission contract."""
 

@@ -265,6 +265,10 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         "jobs": {
             "request_hash": "TEXT",
             "request_hash_version": "INTEGER",
+            "error_category": "TEXT",
+            "human_hint": "TEXT",
+            "retryable": "INTEGER NOT NULL DEFAULT 0",
+            "gateway_stage": "TEXT",
         },
     }
     for table, columns in additions.items():

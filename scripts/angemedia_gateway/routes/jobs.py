@@ -17,7 +17,8 @@ VALID_STATUSES = {"queued", "running", "succeeded", "failed", "canceled"}
 LIST_COLUMNS = (
     "id,kind,status,provider,model,prompt,"
     "created_at,updated_at,started_at,completed_at,duration_ms,"
-    "external_task_id,error_code,error_message"
+    "external_task_id,error_code,error_message,"
+    "error_category,human_hint,retryable,gateway_stage"
 )
 
 

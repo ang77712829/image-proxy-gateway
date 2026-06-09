@@ -161,6 +161,10 @@ def update_job_status(
     started_at: str | None = None,
     completed_at: str | None = None,
     duration_ms: int | None = None,
+    error_category: str | None = None,
+    human_hint: str | None = None,
+    retryable: int | None = None,
+    gateway_stage: str | None = None,
 ) -> dict[str, Any] | None:
     """更新 job 状态及相关字段，自动刷新 updated_at。"""
     existing = get_job(job_id)
@@ -176,16 +180,24 @@ def update_job_status(
     new_started_at = started_at if started_at is not None else existing.get("started_at")
     new_completed_at = completed_at if completed_at is not None else existing.get("completed_at")
     new_duration_ms = duration_ms if duration_ms is not None else existing.get("duration_ms")
+    new_error_category = error_category if error_category is not None else existing.get("error_category")
+    new_human_hint = human_hint if human_hint is not None else existing.get("human_hint")
+    new_retryable = retryable if retryable is not None else (existing.get("retryable") or 0)
+    new_gateway_stage = gateway_stage if gateway_stage is not None else existing.get("gateway_stage")
     with closing(db_connect()) as conn:
         conn.execute(
             "UPDATE jobs SET status=?,provider=?,model=?,output_json=?,"
             "error_code=?,error_message=?,external_task_id=?,"
-            "started_at=?,completed_at=?,duration_ms=?,updated_at=? "
+            "started_at=?,completed_at=?,duration_ms=?,"
+            "error_category=?,human_hint=?,retryable=?,gateway_stage=?,"
+            "updated_at=? "
             "WHERE id=?",
             (
                 status, new_provider, new_model, new_output_json,
                 new_error_code, new_error_message, new_external_task_id,
-                new_started_at, new_completed_at, new_duration_ms, now,
+                new_started_at, new_completed_at, new_duration_ms,
+                new_error_category, new_human_hint, new_retryable, new_gateway_stage,
+                now,
                 job_id,
             ),
         )

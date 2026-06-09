@@ -120,7 +120,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """图片生成成功后创建 job。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertEqual(self._count_jobs(), 1)
@@ -130,7 +130,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """成功 job kind == 'image'。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -141,7 +141,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """成功后 job status == 'succeeded'。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -151,7 +151,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """成功 job 记录 prompt/model/provider。"""
         req = self._make_request(prompt="a dog")
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -163,7 +163,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """成功 job 记录 duration_ms。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -174,7 +174,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """response 保留原有 data 结构。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertIn("data", result)
@@ -185,7 +185,7 @@ class ImageJobSuccessTest(_ImageJobTestBase):
         """response 顶层包含 job_id。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertIn("job_id", result)
@@ -202,7 +202,7 @@ class ImageJobRequestHashPopulateTest(_ImageJobTestBase):
         from angemedia_gateway.routing import RouteTarget
 
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [RouteTarget(provider="siliconflow", model="kolors")]
             return await_compat(self.service.create_image(req))
 
@@ -305,7 +305,7 @@ class ImageJobRequestHashPopulateTest(_ImageJobTestBase):
         provider = FakeImageProvider(SUCCESS_RESULT)
         req = self._make_request(providerToken="sk-should-not-hash")
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": provider}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": provider}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             with self.assertRaises(ValueError):
                 await_compat(self.service.create_image(req))
@@ -322,7 +322,7 @@ class ImageJobLegacyRecordsTest(_ImageJobTestBase):
         """generations 历史记录仍正常。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             await_compat(self.service.create_image(req))
         conn = self._conn()
@@ -343,7 +343,7 @@ class ImageJobLegacyRecordsTest(_ImageJobTestBase):
         }
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             await_compat(self.service.create_image(req))
         conn = self._conn()
@@ -366,7 +366,7 @@ class ImageJobFallbackTest(_ImageJobTestBase):
         fail_target = RouteTarget(provider="fail_provider", model="fail-model")
         success_target = RouteTarget(provider="ok_provider", model="ok-model")
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {
                  "fail_provider": FakeFailingProvider(),
                  "ok_provider": FakeImageProvider(SUCCESS_RESULT),
              }):
@@ -387,7 +387,7 @@ class ImageJobFailureTest(_ImageJobTestBase):
         from angemedia_gateway.routing import RouteTarget
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {
                  "fail1": FakeFailingProvider(),
                  "fail2": FakeFailingProvider(),
              }):
@@ -412,7 +412,7 @@ class ImageJobFailureTest(_ImageJobTestBase):
         from angemedia_gateway.routing import RouteTarget
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"f": FakeFailingProvider()}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"f": FakeFailingProvider()}):
             mock_chain.return_value = [RouteTarget(provider="f", model="m")]
             with self.assertRaises(ImageProvidersFailed):
                 await_compat(self.service.create_image(req))
@@ -431,7 +431,7 @@ class ImageJobFailureTest(_ImageJobTestBase):
         from angemedia_gateway.routing import RouteTarget
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"f": FakeFailingProvider()}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"f": FakeFailingProvider()}):
             mock_chain.return_value = [RouteTarget(provider="f", model="m")]
             with self.assertRaises(ImageProvidersFailed):
                 await_compat(self.service.create_image(req))
@@ -454,7 +454,7 @@ class ImageJobFailureTest(_ImageJobTestBase):
 
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"leak": SecretLeakingProvider()}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"leak": SecretLeakingProvider()}):
             mock_chain.return_value = [RouteTarget(provider="leak", model="m")]
             with self.assertRaises(ImageProvidersFailed):
                 await_compat(self.service.create_image(req))
@@ -478,7 +478,7 @@ class ImageJobStartedAtTest(_ImageJobTestBase):
         """built-in 成功 job 的 started_at 非空。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -495,8 +495,8 @@ class ImageJobGracefulDegradationTest(_ImageJobTestBase):
         """mock create_job 抛异常时，图片生成成功 response 仍为 200，且不包含 job_id。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}), \
-             patch("angemedia_gateway.services.media_service.create_job", side_effect=RuntimeError("simulated DB failure")):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}), \
+            patch("angemedia_gateway.services.media_service.create_job", side_effect=RuntimeError("simulated DB failure")):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertIn("data", result)
@@ -507,8 +507,8 @@ class ImageJobGracefulDegradationTest(_ImageJobTestBase):
         """mock update_job_status 抛异常时，图片生成成功 response 仍为 200。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}), \
-             patch("angemedia_gateway.services.media_service.update_job_status", side_effect=RuntimeError("simulated DB failure")):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}), \
+            patch("angemedia_gateway.services.media_service.update_job_status", side_effect=RuntimeError("simulated DB failure")):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertIn("data", result)
@@ -528,8 +528,8 @@ class ImageJobOutputJsonTest(_ImageJobTestBase):
         }
         req = self._make_request(response_format="b64_json")
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(b64_result)}), \
-             patch("angemedia_gateway.services.media_service.maybe_to_b64", return_value=b64_result):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(b64_result)}), \
+            patch("angemedia_gateway.services.media_service.maybe_to_b64", return_value=b64_result):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         job = self._get_job_by_id(result["job_id"])
@@ -581,7 +581,7 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         }
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         # asset 存在
@@ -600,7 +600,7 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         }
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             await_compat(self.service.create_image(req))
         # 先查 asset
@@ -622,8 +622,8 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         }
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}), \
-             patch("angemedia_gateway.services.media_service.create_job", side_effect=RuntimeError("DB failure")):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}), \
+            patch("angemedia_gateway.services.media_service.create_job", side_effect=RuntimeError("DB failure")):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         # response 不含 job_id
@@ -637,7 +637,7 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         """generations 记录仍正常。"""
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(SUCCESS_RESULT)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             await_compat(self.service.create_image(req))
         conn = self._conn()
@@ -663,7 +663,7 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         }
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": FakeImageProvider(fake_result)}):
             mock_chain.return_value = [type("T", (), {"provider": "siliconflow", "model": "kolors"})()]
             result = await_compat(self.service.create_image(req))
         self.assertIn("job_id", result)
@@ -692,7 +692,7 @@ class ImageAssetJobIdTest(_ImageJobTestBase):
         ok_target = RouteTarget(provider="ok_provider", model="ok-model")
         req = self._make_request()
         with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
-             patch("angemedia_gateway.services.media_service.PROVIDERS", {
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {
                  "fail_provider": FakeFailingProvider(),
                  "ok_provider": FakeImageProvider(ok_result),
              }):
@@ -715,3 +715,121 @@ def await_compat(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+# W-ERR-1A Red-contract Tests
+
+
+class WErr1ASanitizedErrorContractTest(_ImageJobTestBase):
+    """W-ERR-1A-R2: 验证错误诊断合同 - 必须断言结构化字段"""
+
+    def test_model_unavailable_requires_structured_error_contract(self) -> None:
+        """model disabled 必须有 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class ModelDisabledProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("30003 Model disabled")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": ModelDisabledProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("error_category", row.keys(), "error_category 字段缺失")
+        self.assertEqual(row["error_category"], "model_unavailable")
+        self.assertIn("human_hint", row.keys(), "human_hint 字段缺失")
+        self.assertIn("retryable", row.keys(), "retryable 字段缺失")
+        self.assertFalse(row["retryable"])
+        self.assertIn("gateway_stage", row.keys(), "gateway_stage 字段缺失")
+
+    def test_content_filtered_requires_structured_error_contract(self) -> None:
+        """prompt filtered 必须有 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class ContentFilteredProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("content policy violation, prompt filtered")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": ContentFilteredProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("error_category", row.keys(), "error_category 字段缺失")
+        self.assertEqual(row["error_category"], "content_filtered")
+        self.assertIn("human_hint", row.keys(), "human_hint 字段缺失")
+        self.assertIn("retryable", row.keys(), "retryable 字段缺失")
+        self.assertFalse(row["retryable"])
+        self.assertIn("gateway_stage", row.keys(), "gateway_stage 字段缺失")
+
+    def test_auth_failed_requires_structured_error_contract(self) -> None:
+        """HTTP 401/403 必须有 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class AuthFailedProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("401 Unauthorized, invalid api key")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": AuthFailedProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("error_category", row.keys(), "error_category 字段缺失")
+        self.assertEqual(row["error_category"], "auth_failed")
+        self.assertIn("human_hint", row.keys(), "human_hint 字段缺失")
+        self.assertIn("retryable", row.keys(), "retryable 字段缺失")
+        self.assertFalse(row["retryable"])
+        self.assertIn("gateway_stage", row.keys(), "gateway_stage 字段缺失")
+        self.assertNotIn("sk-test-secret", row["error_message"] or "")
+
+    def test_quota_or_rate_limited_requires_structured_error_contract(self) -> None:
+        """HTTP 429 必须有 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class RateLimitedProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("429 rate limit exceeded, quota insufficient")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": RateLimitedProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("error_category", row.keys(), "error_category 字段缺失")
+        self.assertIn(row["error_category"], ["quota_exceeded", "provider_rate_limited"])
+        self.assertIn("human_hint", row.keys(), "human_hint 字段缺失")
+        self.assertIn("retryable", row.keys(), "retryable 字段缺失")
+        self.assertTrue(row["retryable"])
+        self.assertIn("gateway_stage", row.keys(), "gateway_stage 字段缺失")
+
+    def test_provider_error_never_leaks_secret_or_raw_body(self) -> None:
+        """provider 错误中不得泄露 secret / raw body / headers"""
+        from angemedia_gateway.routing import RouteTarget
+
+        class SecretLeakingProvider:
+            async def generate(self, req, target):
+                raise RuntimeError("api_key=sk-test-secret-12345 Authorization: Bearer am-leaked-token raw body: test")
+
+        req = self._make_request()
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain,              patch("angemedia_gateway.services.media_service.PROVIDERS", {"test": SecretLeakingProvider()}):
+            mock_chain.return_value = [RouteTarget(provider="test", model="m")]
+            with self.assertRaises(ImageProvidersFailed):
+                await_compat(self.service.create_image(req))
+
+        conn = self._conn()
+        row = conn.execute("SELECT error_message FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertNotIn("sk-test-secret-12345", row["error_message"])
+        self.assertNotIn("am-leaked-token", row["error_message"])

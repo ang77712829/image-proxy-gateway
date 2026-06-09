@@ -57,6 +57,9 @@ class _JobsApiTestBase(unittest.TestCase):
         init_db()
         ensure_default_admin_user()
         self.client = TestClient(app)
+        from angemedia_gateway.state import create_gateway_api_key
+        key_item = create_gateway_api_key(name="test")
+        self.headers = {"Authorization": f"Bearer {key_item['key']}"}
 
     def tearDown(self) -> None:
         C.DB_FILE = self._orig_db
@@ -325,3 +328,53 @@ class JobsApiNotImplementedTest(_JobsApiTestBase):
         self.login_admin()
         resp = self.client.delete("/v1/jobs/fake-id")
         self.assertIn(resp.status_code, (404, 405))
+
+
+class WErr1AJobsContractTest(unittest.TestCase):
+    """W-ERR-1A-R2: 验证 Jobs API 结构化错误合同"""
+
+    def setUp(self) -> None:
+        self._tmp_dir = tempfile.mkdtemp(prefix="jobs-api-test-")
+        self._db_path = Path(self._tmp_dir) / "test.db"
+        self._orig_db = C.DB_FILE
+        C.DB_FILE = self._db_path
+        init_db()
+        self.client = TestClient(app)
+        from angemedia_gateway.state import create_gateway_api_key
+        key_item = create_gateway_api_key(name="test")
+        self.headers = {"Authorization": f"Bearer {key_item['key']}"}
+        from angemedia_gateway.state import create_gateway_api_key
+        key_item = create_gateway_api_key(name="test")
+        self.headers = {"Authorization": f"Bearer {key_item['key']}"}
+
+    def tearDown(self) -> None:
+        C.DB_FILE = self._orig_db
+        shutil.rmtree(self._tmp_dir, ignore_errors=True)
+
+    def test_jobs_list_requires_structured_error_fields(self) -> None:
+        """Jobs list 必须暴露 error_category / human_hint / retryable / gateway_stage"""
+        from angemedia_gateway.state import create_job
+
+        # 创建一个 failed job
+        job = create_job(
+            kind="image", status="failed", prompt="test",
+            error_code="all_providers_failed", error_message="test error"
+        )
+
+        resp = self.client.get("/v1/jobs?limit=10", headers=self.headers)
+        self.assertEqual(resp.status_code, 200)
+        jobs = resp.json().get("data", [])
+        self.assertTrue(len(jobs) > 0, "Jobs list 应该有数据")
+
+        job = jobs[0]
+        # 断言结构化错误合同字段
+        self.assertIn("error_category", job, "error_category 字段缺失")
+        self.assertIn("human_hint", job, "human_hint 字段缺失")
+        self.assertIn("retryable", job, "retryable 字段缺失")
+        self.assertIn("gateway_stage", job, "gateway_stage 字段缺失")
+
+        # 确保隐藏内部字段
+        self.assertNotIn("request_hash", job)
+        self.assertNotIn("request_hash_version", job)
+        self.assertNotIn("input_json", job)
+        self.assertNotIn("output_json", job)

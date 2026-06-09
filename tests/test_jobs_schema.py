@@ -63,6 +63,7 @@ class JobsTableStructureTest(_JobsSchemaTestBase):
                 "external_task_id", "created_at", "updated_at",
                 "started_at", "completed_at", "duration_ms",
                 "request_hash", "request_hash_version",
+                "error_category", "human_hint", "retryable", "gateway_stage",
             }
             self.assertEqual(cols, expected)
         finally:
