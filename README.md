@@ -1,4 +1,4 @@
-# AngeMedia Gateway
+# AngeMedia API 模式
 
 [English](README.md) | [简体中文](README_CN.md)
 
@@ -54,6 +54,12 @@ pip install -r requirements.txt
 
 cp .env.example .env
 python3 scripts/proxy.py
+```
+
+Or use uvicorn directly:
+
+```bash
+python -m uvicorn scripts.angemedia_gateway.server:app --host 127.0.0.1 --port 9890
 ```
 
 Open:
@@ -128,60 +134,105 @@ curl -X POST http://localhost:9890/v1/media/route \
 - Prompt enhancement: `docs/SKILL_PROMPT_ENHANCEMENT.md`
 - Agnes examples: `docs/AGNES_MODEL_CALL_EXAMPLES.md`
 
+## Web Studio
+
+v0.2.0 provides a minimal Web Studio for basic administration:
+
+**Entry points:**
+
+- Studio: `GET /` or `GET /studio`
+- Redirect: `GET /admin` → `/#/dashboard`
+- Redirect: `GET /admin/` → `/#/dashboard`
+
+**Features:**
+
+- Dashboard: health/session summary
+- Generate Image: prompt input with provider selection
+- Jobs: list view of generation jobs
+- Assets: list view of generated/uploaded assets with thumbnails
+- Providers: minimal onboarding (create/enable/disable)
+- API Keys: list/create/revoke for API mode
+
+**Admin login:**
+
+```text
+username: admin
+password: admin123456
+```
+
+The password is stored as a PBKDF2 hash in SQLite, not as plaintext. Change it immediately after first login in production.
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_DEFAULT_PASSWORD=admin123456
+ADMIN_COOKIE_SECURE=false
+```
+
+## Provider onboarding (minimal)
+
+1. Login to Web Studio at `http://localhost:9890/`
+2. Navigate to "Providers" (服务商)
+3. Click "Create Provider"
+4. Select `openai_image` provider type
+5. Fill: name, base_url, default_model, api_key
+6. Enable the provider
+7. Navigate to "Generate Image" (生成图片)
+8. Select your custom provider from dropdown
+9. Enter prompt and submit
+
+**Current scope:** Provider create and enable/disable only. Provider test/status/delete/sort/edit UI is not yet implemented.
+
+## Jobs and Assets
+
+- **Jobs:** View list of generation jobs with status, type, duration
+- **Assets:** View list of generated/uploaded assets with thumbnails
+
+Both are read-only list views. Detail pages and full management UI are planned for future releases.
+
+## Security notes
+
+- **Admin API:** Uses HttpOnly session cookie authentication
+- **API mode API Keys:** Used for `/v1/images/generations` and other generation endpoints
+- **API Key boundary:** API mode API Keys cannot access Admin API endpoints
+- **File access:** `/generated` and `/uploads` require authentication
+- **Health endpoint:** `/health` returns minimal `{"status":"ok"}` (no secrets)
+- **Request hash:** Generation requests include dedupe/admission via request_hash
+- **Secrets protection:** Provider secrets, raw URLs, and sensitive data are not exposed in Web Studio summaries
+
+## Current limitations (v0.2.0)
+
+The following features are not yet implemented:
+
+- Generate Video Web Studio UI (backend API available, UI planned)
+- Diagnostics page
+- Full Provider management (test/status/delete/sort/edit)
+- Provider fallback chain UI
+- Provider templates/catalog
+- Complete video generation workflow in Web Studio
+- Worker/Queue/job_events UI
+- multi-user/SaaS/billing/quota
+- old admin restoration
+- v0.1 data migration/backfill
+- Google provider support
+- Model override UI
+
+## Legacy v0.1.0 reference
+
+v0.1.0 had a broader legacy UI and more old user-facing controls. It remains useful as a reference for users who specifically need the old local-only experience, but it does not share the v0.2.0 security boundaries and Web Studio architecture.
+
+For new deployments, v0.2.0 is the recommended baseline. Use any legacy v0.1.0 README or release archive only with the security trade-offs understood. The `v0.1.0` tag is available in the repository for historical reference.
+
 ## Version
 
-AngeMedia Gateway starts fresh at `v0.1.0`.
+AngeMedia Gateway v0.2.0 - Core-Safe + Minimal Web Studio + Minimal Provider Onboarding
 
 The previous experimental name was Image Proxy Gateway. There is no compatibility promise for the old name because the project had no public users yet.
+
+v0.2.0 focuses on safe foundation and minimal usable Web Studio. v0.2.x will recover more user-facing experience.
 
 ## License
 
 MIT
-
-
-## Web UI
-
-- Studio: `GET /` or `GET /studio`
-- Admin: `GET /admin`
-- API docs: `GET /api-docs`
-
-The Studio keeps the generation workflow focused: it shows a breathing pixel-assembly animation while media is being generated, fades the finished image/video into the preview area, keeps raw JSON collapsed behind a debug toggle, and provides browser downloads for generated media. It also includes a browser-side generation queue so repeated clicks do not submit duplicate jobs. When the Ange assistant is enabled, it surfaces concrete plan details, prompt changes, work steps, and an inline confirm-and-execute action before generation. Provider state, model alias lists, and grouped Chinese configuration controls live in the Admin page.
-
-The Admin configuration center groups settings by purpose: basic gateway/localization, built-in image channels, Agnes, OpenAI-compatible image, custom providers, and the optional Ange assistant. Custom OpenAI-compatible image providers can be added multiple times, sorted, tested, enabled/disabled, and deleted. The assistant page can pull model lists and test LLM connectivity. Human-facing labels and descriptions are localized; environment variable names remain visible only as developer identifiers.
-
-
-## v0.1.0 expanded local runtime
-
-This version also includes a small local runtime layer:
-
-- SQLite memory database: `ANGEMEDIA_DB_FILE`
-- Provider configuration management: `/v1/admin/config`
-- Provider configuration metadata: `/v1/admin/config-metadata`
-- Provider status/templates and custom provider operations: `/v1/admin/provider-status`, `/v1/admin/provider-templates`, `/v1/admin/providers/*`
-- Assistant model pull and connectivity test: `/v1/admin/assistant/models`, `/v1/admin/assistant/test`
-- Generation history: `/v1/history`
-- Video task queue: `/v1/video-tasks`
-- Upload manager for multi-image references: `/v1/uploads`
-- Optional Ange assistant:
-  - `POST /v1/assistant/plan`
-  - `POST /v1/assistant/generate`
-
-The built-in assistant uses OpenAI-compatible chat completions when configured. If it is disabled or not configured, AngeMedia falls back to the rule-based route and prompt enhancement logic.
-
-Assistant configuration keys:
-
-```env
-ANGE_ASSISTANT_ENABLED=false
-ANGE_LLM_API_KEY=
-ANGE_LLM_BASE_URL=https://api.openai.com/v1
-ANGE_LLM_MODEL=gpt-4o-mini
-ANGE_LLM_TEMPERATURE=0.35
-ANGE_LLM_TIMEOUT=60
-ANGE_ASSISTANT_ALLOW_PAID=false
-ANGE_ASSISTANT_ALLOW_AGNES=true
-ANGE_ASSISTANT_CONFIRM_PLAN=false
-```
-
 
 ## Modular backend layout
 
@@ -191,14 +242,13 @@ The compatibility entry remains:
 scripts/proxy.py
 ```
 
-The real backend implementation now lives in:
+The real backend implementation lives in:
 
 ```text
 scripts/angemedia_gateway/
 ```
 
 This splits configuration, configuration metadata, SQLite state, schemas, media localization, routing, assistant logic, providers, and FastAPI route assembly. `server.py` only assembles the app; page, admin, media, and storage routes live under `scripts/angemedia_gateway/routes/`.
-
 
 ## Standalone Agent Skill package
 
@@ -217,37 +267,6 @@ angemedia-gateway-<version>.zip
 angemedia-gateway-skill-<version>.zip
 ```
 
-
-## Admin login
-
-The admin panel uses username/password login by default:
-
-```text
-username: admin
-password: admin123456
-```
-
-The password is stored as a PBKDF2 hash in SQLite, not as plaintext. Change it immediately after first login in production.
-
-```env
-ADMIN_USERNAME=admin
-ADMIN_DEFAULT_PASSWORD=admin123456
-ADMIN_COOKIE_SECURE=false
-```
-
-
-## Docker frontend assets
-
-The Dockerfile copies the `app/` directory, so Studio, Admin, and API docs pages are available in container deployments.
-
-
-## Security notes
-
-- Admin login has a basic rate limit: 5 failed attempts lock the user/IP pair for 30 seconds.
-- Generated gateway keys saved by the admin panel are no longer returned as plaintext by default.
-- Docker image includes HEALTHCHECK.
-- Admin APIs support HttpOnly cookie auth and still accept `GATEWAY_API_KEY`.
-
 ## Security note: GATEWAY_API_KEY
 
 When `GATEWAY_API_KEY` is empty, AngeMedia allows local/LAN clients to call image and video generation APIs without an API key. This is intentional for self-hosted local deployments.
@@ -255,3 +274,7 @@ When `GATEWAY_API_KEY` is empty, AngeMedia allows local/LAN clients to call imag
 For public deployments, always configure `GATEWAY_API_KEY`, use HTTPS reverse proxy protection, and change the default admin password.
 
 - `UPLOAD_MAX_FILES` controls how many files `/v1/uploads` accepts in one request; default is 10. Remote media localization validates the original URL and every redirect target to reduce SSRF risk.
+
+## Docker frontend assets
+
+The Dockerfile copies the `app/` directory, so Studio and related pages are available in container deployments.
