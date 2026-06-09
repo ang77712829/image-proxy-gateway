@@ -5,12 +5,10 @@ import { t, getLanguage, setLanguage, supportedLanguages } from './i18n.js';
 const NAV = [
   { hash: '#/dashboard',          key: 'nav.dashboard' },
   { hash: '#/generate/image',     key: 'nav.generateImage' },
-  { hash: '#/generate/video',     key: 'nav.generateVideo' },
   { hash: '#/jobs',               key: 'nav.jobs' },
   { hash: '#/assets',             key: 'nav.assets' },
   { hash: '#/providers',          key: 'nav.providers' },
   { hash: '#/gateway-keys',       key: 'nav.apiKeys' },
-  { hash: '#/diagnostics',        key: 'nav.diagnostics' },
 ];
 
 let shellRendered = false;
