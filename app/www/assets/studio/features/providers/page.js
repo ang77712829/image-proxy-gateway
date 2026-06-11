@@ -4,10 +4,14 @@ import { button } from '../../components/buttons.js';
 import { badge } from '../../components/badges.js';
 import { el, mount } from '../../components/dom.js';
 import { field, input, select, toggle } from '../../components/forms.js';
-import { pageHeader, panel, metaGrid } from '../../components/page.js';
+import { confirmModal } from '../../components/modal.js';
+import { clampPage, pageSlice, paginationBar } from '../../components/pagination.js';
+import { pageHeader, panel } from '../../components/page.js';
 import { emptyState, errorState, loadingState } from '../../components/states.js';
 import { toast } from '../../components/toast.js';
+import { safeErrorMessage } from '../../lib/safe-error.js';
 import { formatDate, shortId } from '../../lib/format.js';
+import { safeText } from '../../lib/security.js';
 
 const PROVIDER_SECRET_RESPONSE_FIELDS = [
   'api_key',
@@ -24,6 +28,9 @@ const PROVIDER_SECRET_RESPONSE_FIELDS = [
   'exception',
   'stack',
 ];
+const PROVIDER_PAGE_SIZE = 5;
+
+let providerPage = 1;
 
 function hasProviderSecretField(item) {
   if (!item || typeof item !== 'object') return false;
@@ -36,6 +43,14 @@ function dataArray(result) {
   return Array.isArray(result?.data) ? result.data : [];
 }
 
+function pagerLabels() {
+  return {
+    prev: t('common.prev'),
+    next: t('common.next'),
+    status: t('common.pageStatus'),
+  };
+}
+
 function providerStatus(provider) {
   if (provider.enabled) return badge(t('providers.enabled'), 'success');
   return badge(t('providers.disabled'), 'muted');
@@ -44,6 +59,40 @@ function providerStatus(provider) {
 function keyStatus(provider) {
   if (provider.api_key_configured) return badge(t('providers.configured'), 'success');
   return badge(t('providers.notConfigured'), 'warning');
+}
+
+function providerCreateErrorMessage(error) {
+  const detail = typeof error?.detail === 'string' ? error.detail : '';
+  const message = [
+    error?.safe?.message,
+    error?.message,
+    detail,
+  ].filter(Boolean).join(' ');
+
+  if (/内网|保留地址|private|reserved|loopback|link-local|localhost/i.test(message)) {
+    return t('providers.privateUrlPolicy');
+  }
+
+  return safeErrorMessage(error, t('providers.createError'));
+}
+
+function confirmRemoveProvider(provider, reload) {
+  confirmModal({
+    title: t('providers.removeTitle'),
+    message: `${t('providers.removeMessage')} ${safeText(provider.name || provider.id || '-', 80)}`,
+    confirmLabel: t('common.delete'),
+    cancelLabel: t('common.cancel'),
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await api.delete(`/admin/providers/${encodeURIComponent(provider.id)}`);
+        toast(t('providers.removeSuccess'), 'success');
+        await reload();
+      } catch (_) {
+        toast(t('providers.removeError'), 'error');
+      }
+    },
+  });
 }
 
 function providerCard(provider, reload) {
@@ -65,25 +114,29 @@ function providerCard(provider, reload) {
     },
   });
 
-  return el('article', { class: 'provider-card' },
-    el('div', { class: 'provider-card-header' },
-      el('div', {},
-        el('p', { class: 'card-title' }, provider.name || provider.id || '-'),
-        el('p', { class: 'card-subtitle' }, shortId(provider.id)),
+  return el('article', { class: 'provider-card provider-compact-card' },
+    el('div', { class: 'provider-compact-main' },
+      el('div', { class: 'provider-card-header' },
+        el('div', { class: 'truncate' },
+          el('p', { class: 'card-title truncate', title: provider.name || provider.id || '-' }, safeText(provider.name || provider.id || '-', 96)),
+          el('p', { class: 'card-subtitle truncate', title: provider.id || '' }, `${shortId(provider.id)} · ${safeText(provider.provider_type || '-', 60)}`),
+        ),
+        el('div', { class: 'action-row provider-badges' }, providerStatus(provider), keyStatus(provider)),
       ),
-      el('div', { class: 'action-row' }, providerStatus(provider), keyStatus(provider)),
+      el('div', { class: 'provider-compact-meta' },
+        el('span', { title: provider.default_model || '' }, `${t('providers.defaultModel')}: ${safeText(provider.default_model || '-', 80)}`),
+        el('span', {}, `${t('providers.created')}: ${formatDate(provider.created_at)}`),
+        el('span', {}, `${t('providers.updated')}: ${formatDate(provider.updated_at)}`),
+      ),
     ),
-    metaGrid([
-      { label: t('providers.type'), value: provider.provider_type || '-' },
-      { label: t('providers.defaultModel'), value: provider.default_model || '-' },
-      { label: t('providers.endpoint'), value: t('providers.endpointSummaryGap') },
-      { label: t('providers.created'), value: formatDate(provider.created_at) },
-      { label: t('providers.updated'), value: formatDate(provider.updated_at) },
-    ]),
-    el('div', { class: 'action-row' },
+    el('div', { class: 'action-row provider-compact-actions' },
       toggleButton,
+      button(t('common.delete'), {
+        size: 'sm',
+        variant: 'danger',
+        onClick: () => confirmRemoveProvider(provider, reload),
+      }),
     ),
-    el('p', { class: 'card-subtitle' }, t('providers.advancedNote')),
   );
 }
 
@@ -96,8 +149,25 @@ function createProviderForm(reload) {
   const enabledToggle = toggle(t('providers.createEnabled'), { name: 'enabled', checked: true });
   const enabledInput = enabledToggle.querySelector('input');
   const submit = button(t('providers.createSubmit'), { variant: 'primary' });
+  const formError = el('p', { class: 'form-error', hidden: true });
+
+  function showFormError(message) {
+    formError.textContent = safeText(message, 260);
+    formError.hidden = false;
+  }
+
+  function clearFormError() {
+    formError.textContent = '';
+    formError.hidden = true;
+  }
+
+  [nameInput, endpointInput, modelInput, secretInput, typeSelect, enabledInput].forEach((control) => {
+    control.addEventListener('input', clearFormError);
+    control.addEventListener('change', clearFormError);
+  });
 
   submit.addEventListener('click', async () => {
+    clearFormError();
     const payload = {
       name: nameInput.value.trim(),
       provider_type: typeSelect.value,
@@ -107,6 +177,7 @@ function createProviderForm(reload) {
       enabled: enabledInput.checked,
     };
     if (!payload.name || !payload.base_url || !payload.default_model) {
+      showFormError(t('providers.createRequired'));
       toast(t('providers.createRequired'), 'error');
       return;
     }
@@ -115,6 +186,7 @@ function createProviderForm(reload) {
     try {
       const result = await api.post('/admin/providers', payload);
       if (hasProviderSecretField(result)) {
+        showFormError(t('providers.securityError'));
         toast(t('providers.securityError'), 'error');
         return;
       }
@@ -125,8 +197,10 @@ function createProviderForm(reload) {
       enabledInput.checked = true;
       toast(t('providers.createSuccess'), 'success');
       await reload();
-    } catch (_) {
-      toast(t('providers.createError'), 'error');
+    } catch (error) {
+      const message = providerCreateErrorMessage(error);
+      showFormError(message);
+      toast(message, 'error');
     } finally {
       submit.disabled = false;
       submit.textContent = t('providers.createSubmit');
@@ -143,12 +217,16 @@ function createProviderForm(reload) {
         field(t('providers.secret'), secretInput),
         enabledToggle,
       ),
+      formError,
       el('div', { class: 'action-row' }, submit),
     ),
   );
 }
 
 function renderProviders(content, providers, reload) {
+  const paged = pageSlice(providers, providerPage, PROVIDER_PAGE_SIZE);
+  providerPage = paged.current;
+
   mount(content,
     pageHeader({
       kicker: t('providers.kicker'),
@@ -156,11 +234,23 @@ function renderProviders(content, providers, reload) {
       subtitle: t('providers.subtitle'),
       actions: [button(t('common.refresh'), { onClick: reload })],
     }),
-    createProviderForm(reload),
-    panel({ title: t('providers.title'), subtitle: t('providers.advancedNote') },
-      el('div', { class: 'providers-content' },
-        providers.length ? el('div', { class: 'provider-list' }, providers.map((provider) => providerCard(provider, reload))) :
-          emptyState(t('providers.empty')),
+    el('div', { class: 'provider-layout' },
+      createProviderForm(reload),
+      panel({ title: t('providers.title'), subtitle: t('providers.advancedNote') },
+        el('div', { class: 'providers-content' },
+          providers.length ? el('div', { class: 'provider-list bounded-list' }, paged.items.map((provider) => providerCard(provider, reload))) :
+            emptyState(t('providers.empty')),
+        ),
+        paginationBar({
+          page: providerPage,
+          total: providers.length,
+          pageSize: PROVIDER_PAGE_SIZE,
+          labels: pagerLabels(),
+          onPage: (page) => {
+            providerPage = page;
+            renderProviders(content, providers, reload);
+          },
+        }),
       ),
     ),
   );
@@ -180,7 +270,9 @@ export async function render() {
         );
         return;
       }
-      renderProviders(content, dataArray(result), reload);
+      const providers = dataArray(result);
+      providerPage = clampPage(providerPage, providers.length, PROVIDER_PAGE_SIZE);
+      renderProviders(content, providers, reload);
     } catch (_) {
       mount(content,
         pageHeader({ kicker: t('providers.kicker'), title: t('providers.title'), subtitle: t('providers.subtitle') }),

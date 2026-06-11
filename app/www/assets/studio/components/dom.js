@@ -14,7 +14,6 @@ export function el(tag, attrs = {}, ...children) {
     if (key === 'class') node.className = value;
     else if (key === 'dataset') Object.assign(node.dataset, value);
     else if (key === 'text') node.textContent = text(value, '');
-    else if (key === 'html') node.innerHTML = value;
     else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
     else if (key in node) node[key] = value;
     else node.setAttribute(key, String(value));

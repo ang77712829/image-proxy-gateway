@@ -14,7 +14,7 @@ export async function renderUnavailable({ titleKey, id = '' }) {
       subtitle: id ? `${t('wip.message')}: ${id}` : t('wip.message'),
       actions: [button(t('nav.dashboard'), { onClick: () => navigate('#/dashboard') })],
     }),
-    panel({},
+    panel({ className: 'wip-panel' },
       unavailableState(t('wip.message'), t('wip.copy')),
     ),
   );

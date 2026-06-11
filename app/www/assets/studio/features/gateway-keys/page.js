@@ -4,18 +4,22 @@ import { button } from '../../components/buttons.js';
 import { badge } from '../../components/badges.js';
 import { el, mount } from '../../components/dom.js';
 import { field, input, textarea, toggle } from '../../components/forms.js';
+import { clampPage, pageSlice, paginationBar } from '../../components/pagination.js';
 import { pageHeader, panel, metaGrid } from '../../components/page.js';
 import { emptyState, errorState, loadingState } from '../../components/states.js';
 import { toast } from '../../components/toast.js';
 import { formatDate, shortId } from '../../lib/format.js';
+import { safeText } from '../../lib/security.js';
 
 const LIST_FORBIDDEN_FIELDS = ['key', 'key_hash'];
 const CREATE_FORBIDDEN_FIELDS = ['key_hash'];
 const REVOKE_FORBIDDEN_FIELDS = ['key', 'key_hash'];
+const KEY_PAGE_SIZE = 5;
 
 let showRevoked = false;
 let keysCache = [];
 let oneTimeSecret = null;
+let keyPage = 1;
 
 function hasForbiddenField(value, fields) {
   if (!value || typeof value !== 'object') return false;
@@ -36,6 +40,14 @@ function keyStatus(item) {
   if (item.revoked_at) return badge(t('apiKeys.revoked'), 'danger');
   if (item.enabled) return badge(t('apiKeys.enabled'), 'success');
   return badge(t('apiKeys.disabled'), 'muted');
+}
+
+function pagerLabels() {
+  return {
+    prev: t('common.prev'),
+    next: t('common.next'),
+    status: t('common.pageStatus'),
+  };
 }
 
 function renderSecretPanel(data, onDismiss) {
@@ -64,7 +76,7 @@ function renderSecretPanel(data, onDismiss) {
 
 function createKeyForm(onCreated) {
   const nameInput = input({ type: 'text', maxLength: 80, autocomplete: 'off', placeholder: t('apiKeys.namePlaceholder') });
-  const noteInput = textarea({ rows: 2, maxLength: 240, placeholder: t('apiKeys.notePlaceholder') });
+  const noteInput = textarea({ rows: 1, maxLength: 240, placeholder: t('apiKeys.notePlaceholder'), class: 'compact-textarea' });
   const submit = button(t('apiKeys.createSubmit'), { variant: 'primary' });
 
   submit.addEventListener('click', async () => {
@@ -96,7 +108,7 @@ function createKeyForm(onCreated) {
     }
   });
 
-  return panel({ title: t('apiKeys.createButton'), subtitle: t('apiKeys.subtitle') },
+  return panel({ title: t('apiKeys.createButton'), subtitle: t('apiKeys.subtitle'), className: 'api-key-form' },
     el('div', { class: 'panel-body form-stack' },
       el('div', { class: 'form-grid' },
         field(t('apiKeys.name'), nameInput),
@@ -155,21 +167,22 @@ function revokePanel(item, reload) {
 
 function keyCard(item, revokeSlot, reload) {
   const canRevoke = !item.revoked_at && item.key_prefix;
-  return el('article', { class: 'key-card' },
+  const meta = [
+    { label: t('apiKeys.created'), value: formatDate(item.created_at) },
+    { label: t('apiKeys.lastUsed'), value: formatDate(item.last_used_at) },
+  ];
+  if (item.revoked_at) meta.push({ label: t('apiKeys.revokedAt'), value: formatDate(item.revoked_at) });
+  if (item.note) meta.push({ label: t('apiKeys.note'), value: safeText(item.note, 80) });
+
+  return el('article', { class: 'key-card key-compact-card' },
     el('div', { class: 'key-card-header' },
       el('div', {},
-        el('p', { class: 'card-title' }, item.name || item.key_prefix || shortId(item.id)),
+        el('p', { class: 'card-title' }, safeText(item.name || item.key_prefix || shortId(item.id), 80)),
         el('p', { class: 'card-subtitle' }, `${t('apiKeys.keyPrefix')}: ${item.key_prefix || '-'}`),
       ),
       keyStatus(item),
     ),
-    metaGrid([
-      { label: t('apiKeys.created'), value: formatDate(item.created_at) },
-      { label: t('apiKeys.lastUsed'), value: formatDate(item.last_used_at) },
-      { label: t('apiKeys.revokedAt'), value: formatDate(item.revoked_at) },
-      { label: t('apiKeys.note'), value: item.note || '-' },
-      { label: 'ID', value: shortId(item.id) },
-    ]),
+    metaGrid(meta),
     canRevoke ? el('div', { class: 'action-row' },
       button(t('apiKeys.revoke'), {
         size: 'sm',
@@ -186,8 +199,18 @@ function keyCard(item, revokeSlot, reload) {
 function renderKeys(content, reload) {
   const revokeSlot = el('div');
   const visible = visibleKeys();
+  const paged = pageSlice(visible, keyPage, KEY_PAGE_SIZE);
+  keyPage = paged.current;
   const activeCount = keysCache.filter((item) => !item.revoked_at).length;
   const revokedCount = keysCache.length - activeCount;
+  const createColumn = el('div', { class: 'api-side' },
+    createKeyForm(reload),
+    oneTimeSecret ? renderSecretPanel(oneTimeSecret, () => {
+      oneTimeSecret = null;
+      renderKeys(content, reload);
+    }) : null,
+    revokeSlot,
+  );
 
   mount(content,
     pageHeader({
@@ -196,29 +219,37 @@ function renderKeys(content, reload) {
       subtitle: t('apiKeys.subtitle'),
       actions: [button(t('common.refresh'), { onClick: reload })],
     }),
-    createKeyForm(reload),
-    oneTimeSecret ? renderSecretPanel(oneTimeSecret, () => {
-      oneTimeSecret = null;
-      renderKeys(content, reload);
-    }) : null,
-    revokeSlot,
-    panel({},
-      el('div', { class: 'keys-toolbar' },
-        el('div', { class: 'action-row' },
-          badge(`${activeCount} ${t('apiKeys.enabled')}`, 'success'),
-          revokedCount ? badge(`${revokedCount} ${t('apiKeys.revoked')}`, 'muted') : null,
+    el('div', { class: 'api-layout' },
+      createColumn,
+      panel({},
+        el('div', { class: 'keys-toolbar' },
+          el('div', { class: 'action-row' },
+            badge(`${activeCount} ${t('apiKeys.enabled')}`, 'success'),
+            revokedCount ? badge(`${revokedCount} ${t('apiKeys.revoked')}`, 'muted') : null,
+          ),
+          toggle(t('apiKeys.showRevoked'), {
+            checked: showRevoked,
+            onchange: (event) => {
+              showRevoked = event.target.checked;
+              keyPage = 1;
+              renderKeys(content, reload);
+            },
+          }),
         ),
-        toggle(t('apiKeys.showRevoked'), {
-          checked: showRevoked,
-          onchange: (event) => {
-            showRevoked = event.target.checked;
+        el('div', { class: 'keys-content' },
+          visible.length ? el('div', { class: 'key-list bounded-list' }, paged.items.map((item) => keyCard(item, revokeSlot, reload))) :
+            emptyState(t('apiKeys.empty')),
+        ),
+        paginationBar({
+          page: keyPage,
+          total: visible.length,
+          pageSize: KEY_PAGE_SIZE,
+          labels: pagerLabels(),
+          onPage: (page) => {
+            keyPage = page;
             renderKeys(content, reload);
           },
         }),
-      ),
-      el('div', { class: 'keys-content' },
-        visible.length ? el('div', { class: 'key-list' }, visible.map((item) => keyCard(item, revokeSlot, reload))) :
-          emptyState(t('apiKeys.empty')),
       ),
     ),
   );
@@ -239,6 +270,7 @@ export async function render() {
         return;
       }
       keysCache = dataArray(result);
+      keyPage = clampPage(keyPage, visibleKeys().length, KEY_PAGE_SIZE);
       renderKeys(content, reload);
     } catch (_) {
       mount(content,

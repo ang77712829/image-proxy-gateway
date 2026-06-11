@@ -1,7 +1,10 @@
 import { logout, getSession } from './auth.js';
 import { navigate } from './router.js';
-import { t, getLanguage, setLanguage, supportedLanguages } from './i18n.js';
+import { t } from './i18n.js';
 import { el } from './components/dom.js';
+import { languageSwitch } from './components/language-switch.js';
+import { showWipFeature } from './components/wip.js';
+import { getTheme, toggleTheme } from './lib/theme.js';
 
 const NAV = [
   { hash: '#/dashboard', key: 'nav.dashboard', group: 'studio' },
@@ -13,6 +16,20 @@ const NAV = [
 ];
 
 let shellRendered = false;
+
+function topAction({ label, icon, onClick, title = '', className = '', wip = false }) {
+  return el('button', {
+    type: 'button',
+    class: ['top-action', className].filter(Boolean).join(' '),
+    title: title || label,
+    ariaLabel: title || label,
+    onclick: onClick,
+  },
+    icon ? el('span', { class: 'top-action-icon' }, icon) : null,
+    el('span', { class: 'top-action-label' }, label),
+    wip ? el('span', { class: 'top-wip-badge' }, 'WIP') : null,
+  );
+}
 
 function renderNav() {
   const nav = document.querySelector('.sidebar-nav');
@@ -52,32 +69,63 @@ export function renderShell() {
   );
   renderNav();
 
-  const langOptions = supportedLanguages.map(lang =>
-    `<option value="${lang}">${lang}</option>`
-  ).join('');
-
-  topbar.innerHTML = `
-    <div class="topbar-left">
-      <span class="topbar-kicker">ANGEMEDIA STUDIO</span>
-      <span class="topbar-title">${t('topbar.studio')}</span>
-    </div>
-    <div class="topbar-right">
-      <span class="status-pill"><span></span>${t('topbar.gatewayOnline')}</span>
-      <select id="studio-lang" class="compact-select" aria-label="${t('topbar.language')}">
-        ${langOptions}
-      </select>
-      <button class="btn btn-sm" id="logout-btn">${t('topbar.logout')}</button>
-    </div>
-  `;
-
-  const langSelect = document.getElementById('studio-lang');
-  langSelect.value = getLanguage();
-  langSelect.addEventListener('change', (e) => {
-    setLanguage(e.target.value);
-    location.reload();
+  topbar.textContent = '';
+  const themeButton = topAction({
+    label: t('topbar.theme'),
+    icon: 'Aa',
+    title: getTheme() === 'dark' ? t('theme.toLight') : t('theme.toDark'),
+    onClick: () => {
+      const next = toggleTheme();
+      const title = next === 'dark' ? t('theme.toLight') : t('theme.toDark');
+      themeButton.title = title;
+      themeButton.setAttribute('aria-label', title);
+    },
   });
 
-  document.getElementById('logout-btn').addEventListener('click', () => logout());
+  const assistantButton = topAction({
+    label: t('topbar.assistant'),
+    icon: 'AI',
+    title: t('topbar.assistantWip'),
+    wip: true,
+    onClick: () => showWipFeature({ title: t('wip.promptCopilotTitle') }),
+  });
+
+  const diagnosticsButton = topAction({
+    label: t('topbar.diagnostics'),
+    icon: 'DX',
+    title: t('topbar.diagnosticsWip'),
+    wip: true,
+    onClick: () => navigate('#/diagnostics'),
+  });
+
+  const logoutButton = topAction({
+    label: t('topbar.logout'),
+    icon: 'OUT',
+    onClick: () => logout(),
+  });
+
+  topbar.appendChild(el('div', { class: 'topbar-inner' },
+    el('div', { class: 'brand' },
+      el('div', { class: 'logo' }, 'Ange', el('em', {}, 'Media')),
+      el('div', { class: 'brand-line' }),
+      el('div', { class: 'title-block' },
+        el('div', { class: 'eyebrow' }, 'ANGEMEDIA STUDIO'),
+        el('h1', {}, t('topbar.studio')),
+      ),
+    ),
+    el('div', { class: 'top-actions' },
+      el('span', { class: 'top-action top-action-status', title: t('topbar.gatewayOnline') },
+        el('span', { class: 'top-action-icon' }, 'ON'),
+        el('span', { class: 'top-action-label' }, t('topbar.gatewayOnline')),
+      ),
+      assistantButton,
+      diagnosticsButton,
+      themeButton,
+      languageSwitch(),
+      logoutButton,
+    ),
+  ));
+
   updateActiveNav();
   window.addEventListener('hashchange', updateActiveNav);
 }

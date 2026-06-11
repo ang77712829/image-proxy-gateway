@@ -17,6 +17,9 @@ export function setUnauthorizedHandler(handler) {
 }
 
 function safeDetail(detail) {
+  if (typeof detail === 'string') {
+    return { message: detail };
+  }
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
     return {};
   }

@@ -5,15 +5,22 @@ import { badge } from '../../components/badges.js';
 import { el, mount } from '../../components/dom.js';
 import { select } from '../../components/forms.js';
 import { confirmModal } from '../../components/modal.js';
+import { clampPage, pageSlice, paginationBar } from '../../components/pagination.js';
 import { pageHeader, panel, metricCard, metaGrid } from '../../components/page.js';
 import { emptyState, errorState, loadingState } from '../../components/states.js';
 import { toast } from '../../components/toast.js';
 import { assetDisplayName, buildAssetDownloadName, isImageAsset, isVideoAsset, safeAssetHref } from '../../lib/asset-url.js';
 import { formatBytes, formatDate, formatDuration, shortId, truncateText } from '../../lib/format.js';
+import { safeText } from '../../lib/security.js';
 
 let allAssets = [];
 let mediaFilter = '';
 let sourceFilter = '';
+let assetPage = 1;
+
+const ASSET_MIN_CARD_WIDTH = 168;
+const ASSET_GRID_GAP = 9;
+const ASSET_ROWS_PER_PAGE = 2;
 
 function dataArray(result) {
   return Array.isArray(result?.data) ? result.data : [];
@@ -33,28 +40,62 @@ function sourceLabel(asset) {
 
 function filteredAssets() {
   return allAssets.filter((asset) => {
-    if (mediaFilter && asset.media_type !== mediaFilter) return false;
+    if (mediaFilter === 'image' && !isImageAsset(asset)) return false;
+    if (mediaFilter === 'video' && !isVideoAsset(asset)) return false;
     if (sourceFilter && asset.source !== sourceFilter) return false;
     return true;
   });
 }
 
+function pagerLabels() {
+  return {
+    prev: t('common.prev'),
+    next: t('common.next'),
+    status: t('common.pageStatus'),
+  };
+}
+
+function assetKindBadge(asset) {
+  const node = badge(safeText(typeLabel(asset), 24), isImageAsset(asset) ? 'info' : 'violet');
+  node.classList.add('asset-kind-badge');
+  return node;
+}
+
+function maxAssetColumns() {
+  const contentWidth = document.getElementById('content')?.clientWidth || window.innerWidth || 1024;
+  const gridWidth = Math.max(ASSET_MIN_CARD_WIDTH, contentWidth - 64);
+  return Math.max(1, Math.floor((gridWidth + ASSET_GRID_GAP) / (ASSET_MIN_CARD_WIDTH + ASSET_GRID_GAP)));
+}
+
+function assetPageSize() {
+  return maxAssetColumns() * ASSET_ROWS_PER_PAGE;
+}
+
+function assetGrid(items, reload) {
+  const columns = maxAssetColumns();
+  const node = el('div', { class: 'asset-grid' }, items.map((asset) => assetCard(asset, reload)));
+  node.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  return node;
+}
+
 function previewNode(asset) {
   const href = safeAssetHref(asset.url_path);
   if (!href) {
-    return el('div', { class: 'asset-thumb' }, emptyState(t('assets.unavailable')));
+    return el('div', { class: 'asset-thumb' }, emptyState(t('assets.unavailable')), assetKindBadge(asset));
   }
   if (isImageAsset(asset)) {
     return el('a', { class: 'asset-thumb', href, target: '_blank', rel: 'noopener noreferrer' },
       el('img', { src: href, alt: assetDisplayName(asset), loading: 'lazy' }),
+      assetKindBadge(asset),
     );
   }
   if (isVideoAsset(asset)) {
     return el('div', { class: 'asset-thumb' },
       el('video', { src: href, controls: true, preload: 'metadata' }),
+      assetKindBadge(asset),
     );
   }
-  return el('div', { class: 'asset-thumb' }, emptyState(t('assets.unavailable')));
+  return el('div', { class: 'asset-thumb' }, emptyState(t('assets.unavailable')), assetKindBadge(asset));
 }
 
 function assetActions(asset, reload) {
@@ -73,10 +114,6 @@ function assetActions(asset, reload) {
       onClick: () => toast(t('assets.downloadUnavailable'), 'error'),
     }));
   }
-  actions.push(button(t('common.edit'), {
-    size: 'sm',
-    onClick: () => toast(t('assets.editUnavailable'), 'info'),
-  }));
   actions.push(button(t('common.delete'), {
     size: 'sm',
     variant: 'danger',
@@ -107,26 +144,29 @@ function assetCard(asset, reload) {
     el('div', { class: 'asset-card-header' },
       el('div', {},
         el('p', { class: 'card-title' }, title),
-        el('p', { class: 'asset-original-name' }, `${t('assets.filename')}: ${asset.filename || '-'}`),
+        el('p', { class: 'card-subtitle' }, formatDate(asset.created_at)),
       ),
-      badge(typeLabel(asset), isImageAsset(asset) ? 'info' : 'violet'),
+    ),
+    el('div', { class: 'asset-tags' },
+      badge(sourceLabel(asset), 'muted'),
+      asset.provider ? badge(safeText(asset.provider, 48), 'info') : null,
+      asset.model ? badge(safeText(asset.model, 48), 'violet') : null,
     ),
     metaGrid([
-      { label: t('assets.source'), value: sourceLabel(asset) },
       { label: t('assets.size'), value: formatBytes(asset.size) },
-      { label: t('assets.provider'), value: asset.provider || '-' },
-      { label: t('assets.model'), value: asset.model || '-' },
       { label: t('assets.jobId'), value: asset.job_id ? shortId(asset.job_id) : '-' },
-      { label: t('assets.created'), value: formatDate(asset.created_at) },
       { label: t('generateImage.duration'), value: asset.duration_ms ? formatDuration(asset.duration_ms) : '' },
     ]),
-    asset.prompt ? el('p', { class: 'card-subtitle' }, truncateText(asset.prompt, 140)) : null,
+    asset.prompt ? el('p', { class: 'card-subtitle prompt' }, truncateText(safeText(asset.prompt, 220), 120)) : null,
     assetActions(asset, reload),
   );
 }
 
 function renderAssets(content, reload) {
   const assets = filteredAssets();
+  const pageSize = assetPageSize();
+  const paged = pageSlice(assets, assetPage, pageSize);
+  assetPage = paged.current;
   const imageCount = allAssets.filter(isImageAsset).length;
   const videoCount = allAssets.filter(isVideoAsset).length;
   const totalBytes = allAssets.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
@@ -155,6 +195,7 @@ function renderAssets(content, reload) {
             value: mediaFilter,
             onchange: (event) => {
               mediaFilter = event.target.value;
+              assetPage = 1;
               renderAssets(content, reload);
             },
           }),
@@ -166,15 +207,29 @@ function renderAssets(content, reload) {
             value: sourceFilter,
             onchange: (event) => {
               sourceFilter = event.target.value;
+              assetPage = 1;
               renderAssets(content, reload);
             },
           }),
         ),
-        badge(`${assets.length} / ${allAssets.length}`, 'muted'),
+        el('div', { class: 'action-row' },
+          badge(`${assets.length} / ${allAssets.length}`, 'muted'),
+          el('span', { class: 'asset-wip-note', title: t('assets.editUnavailable') }, badge('WIP', 'warning')),
+        ),
       ),
       assets.length ?
-        el('div', { class: 'asset-grid' }, assets.map((asset) => assetCard(asset, reload))) :
-        el('div', { class: 'panel-body' }, emptyState(t('assets.empty'))),
+        assetGrid(paged.items, reload) :
+        el('div', { class: 'panel-body asset-empty' }, emptyState(t('assets.empty'))),
+      paginationBar({
+        page: assetPage,
+        total: assets.length,
+        pageSize,
+        labels: pagerLabels(),
+        onPage: (page) => {
+          assetPage = page;
+          renderAssets(content, reload);
+        },
+      }),
     ),
   );
 }
@@ -187,6 +242,7 @@ export async function render() {
     try {
       const result = await api.get('/assets?limit=100&offset=0');
       allAssets = dataArray(result);
+      assetPage = clampPage(assetPage, filteredAssets().length, assetPageSize());
       renderAssets(content, reload);
     } catch (_) {
       mount(content,

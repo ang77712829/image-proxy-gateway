@@ -1,0 +1,510 @@
+/* Page-level layouts and feature-specific composition. */
+.dashboard-grid,
+.generate-grid,
+.provider-layout,
+.api-layout {
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1fr) 420px;
+  margin-top: 14px;
+}
+.dashboard-grid-bottom {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.75fr);
+}
+.side-stack,
+.provider-summary,
+.error-list {
+  display: grid;
+  gap: 14px;
+}
+.dashboard-grid .state,
+.dashboard-grid-bottom .state,
+.recent-strip .state,
+.provider-summary .state,
+.error-list .state,
+.asset-empty .state,
+.jobs-content .state,
+.providers-content .state,
+.keys-content .state {
+  min-height: 92px;
+  padding: 16px;
+}
+.queue-box {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 86% 22%, rgba(56, 124, 255, 0.18), transparent 38%),
+    var(--glass);
+}
+.queue-cell {
+  padding: 16px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.queue-cell:nth-child(2n) { border-right: 0; }
+.queue-cell:nth-last-child(-n+2) { border-bottom: 0; }
+.queue-cell span { color: var(--muted); }
+.queue-cell b {
+  display: block;
+  margin-top: 4px;
+  font-size: 24px;
+}
+.disk-card {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 106px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.disk-ring {
+  width: 98px;
+  height: 98px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, var(--bg-2) 0 54%, transparent 55%),
+    conic-gradient(var(--cyan) 0 32%, rgba(56, 124, 255, 0.55) 32% 52%, rgba(120, 151, 197, 0.22) 52% 100%);
+  box-shadow: inset 0 0 36px rgba(44, 239, 212, 0.12), 0 0 34px rgba(44, 239, 212, 0.1);
+}
+.disk-ring strong {
+  width: 68px;
+  text-align: center;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.provider-row,
+.error-row {
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(8, 20, 40, 0.28);
+}
+.provider-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.error-row {
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  font-size: 13px;
+}
+.provider-logo {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 11px;
+  color: var(--cyan);
+  font-weight: 950;
+  background: linear-gradient(135deg, rgba(44, 239, 212, 0.18), rgba(56, 124, 255, 0.16));
+}
+.generate-grid {
+  grid-template-columns: minmax(340px, 0.86fr) minmax(0, 1.14fr);
+}
+.creator-actions {
+  justify-content: flex-end;
+}
+.result-frame {
+  min-height: clamp(260px, 46vh, 430px);
+  display: grid;
+  gap: 14px;
+  align-content: stretch;
+}
+.result-frame > .state {
+  min-height: clamp(260px, 46vh, 430px);
+}
+.preview-box {
+  height: clamp(240px, 42vh, 430px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px dashed rgba(132, 181, 255, 0.28);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 78% 16%, rgba(123, 92, 255, 0.18), transparent 32%),
+    radial-gradient(circle at 28% 80%, rgba(44, 239, 212, 0.1), transparent 32%),
+    rgba(8, 20, 40, 0.34);
+}
+.result-image,
+.asset-thumb img,
+.asset-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.result-image {
+  max-height: 100%;
+}
+.result-success {
+  display: grid;
+  gap: 14px;
+}
+.recent-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.job-card,
+.asset-card,
+.provider-card,
+.key-card {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: var(--glass);
+}
+.job-card-header,
+.asset-card-header,
+.provider-card-header,
+.key-card-header {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.asset-toolbar,
+.jobs-toolbar,
+.keys-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.asset-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.asset-filters .control {
+  width: auto;
+  min-width: 150px;
+}
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+.asset-card {
+  padding: 12px;
+  gap: 9px;
+  overflow: hidden;
+}
+.asset-thumb {
+  aspect-ratio: 16 / 9;
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(7, 17, 31, 0.66);
+}
+.asset-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.asset-kind-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  min-height: 20px;
+  padding: 0 7px;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+.asset-card .action-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+  gap: 8px;
+}
+.jobs-content,
+.providers-content,
+.keys-content {
+  padding: 14px;
+}
+.job-list,
+.provider-list,
+.key-list {
+  display: grid;
+  gap: 10px;
+}
+.job-row {
+  grid-template-columns: minmax(220px, 1fr) minmax(340px, 0.95fr) minmax(230px, 0.74fr);
+  align-items: start;
+  padding: 12px;
+}
+.job-card.failed {
+  border-color: rgba(255, 94, 122, 0.36);
+}
+.job-main {
+  min-width: 0;
+}
+.job-side {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+.job-diagnostics {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(7, 17, 31, 0.5);
+}
+.job-hint {
+  color: #ffe4ea;
+  font-weight: 750;
+  max-height: 38px;
+  overflow: hidden;
+}
+.job-safe-message {
+  color: var(--muted);
+  font-size: 12px;
+  max-height: 34px;
+  overflow: hidden;
+}
+.provider-layout {
+  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+}
+.provider-card {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.key-card {
+  padding: 12px;
+  gap: 9px;
+}
+.key-card .meta-grid {
+  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+}
+.api-layout {
+  grid-template-columns: minmax(310px, 430px) minmax(0, 1fr);
+}
+.api-side {
+  display: grid;
+  gap: 14px;
+}
+.job-row {
+  grid-template-columns: minmax(220px, 1.05fr) minmax(300px, 0.9fr) minmax(190px, 0.58fr);
+  gap: 10px;
+  padding: 10px 12px;
+}
+.job-row .prompt {
+  max-height: 38px;
+  margin-top: 4px;
+}
+.job-diagnostic-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+.job-diagnostic-summary .action-row,
+.job-diagnostic-strip {
+  gap: 5px;
+  flex-wrap: nowrap;
+}
+.job-diagnostic-summary .job-hint {
+  min-width: 100px;
+  max-width: 42%;
+  color: #ffdce4;
+  font-size: 12px;
+  font-weight: 780;
+}
+.job-diagnostics {
+  padding: 0;
+  background: transparent;
+}
+.job-diagnostics .btn-sm {
+  min-height: 26px;
+  padding: 0 9px;
+}
+.job-detail-line {
+  margin-top: 6px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(7, 17, 31, 0.36);
+}
+.job-diagnostics .job-detail-line {
+  max-height: 96px;
+  overflow: auto;
+  color: var(--text);
+  line-height: 1.45;
+}
+.job-detail-line[hidden] {
+  display: none;
+}
+.provider-compact-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 10px 12px;
+  gap: 12px;
+}
+.provider-compact-main {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.provider-compact-meta {
+  min-width: 0;
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.provider-compact-meta span {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-compact-actions {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.provider-badges {
+  flex-wrap: nowrap;
+}
+.api-key-form .panel-body {
+  padding: 12px;
+}
+.api-key-form .form-grid {
+  gap: 10px 12px;
+  align-items: end;
+}
+.api-key-form .form-stack {
+  gap: 10px;
+}
+.api-key-form .field {
+  gap: 6px;
+}
+.api-key-form .control {
+  min-height: 42px;
+}
+textarea.compact-textarea,
+.api-key-form textarea.control {
+  min-height: 42px;
+  height: 42px;
+  padding-block: 10px;
+  line-height: 20px;
+  resize: none;
+  overflow: hidden;
+}
+.key-compact-card {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1fr) auto;
+  align-items: center;
+  padding: 10px 12px;
+  gap: 7px;
+}
+.key-compact-card .key-card-header {
+  align-items: center;
+}
+.key-compact-card .meta-grid {
+  gap: 4px 10px;
+  font-size: 11px;
+}
+.key-compact-card .action-row {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+.asset-grid {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 9px;
+  padding: 12px;
+}
+.asset-card {
+  padding: 9px;
+  gap: 7px;
+}
+.asset-thumb {
+  aspect-ratio: 16 / 7.2;
+  border-radius: 11px;
+}
+.asset-card .card-title {
+  font-size: 13px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-bottom: 2px;
+}
+.asset-card .asset-card-header {
+  display: block;
+}
+.asset-card .card-subtitle {
+  font-size: 11px;
+  line-height: 1.25;
+}
+.asset-tags {
+  gap: 4px;
+}
+.asset-tags .badge {
+  min-height: 20px;
+  font-size: 11px;
+}
+.asset-card .meta-grid {
+  gap: 3px 8px;
+  font-size: 11px;
+}
+.asset-card .action-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.asset-card .btn-sm {
+  min-height: 28px;
+  padding: 0 8px;
+}
+.asset-empty .state {
+  min-height: 74px;
+}
+.recent-strip {
+  gap: 8px;
+}
+.recent-strip .job-card {
+  padding: 10px;
+  gap: 8px;
+}
+.recent-strip .meta-grid {
+  gap: 4px 8px;
+}
+.provider-summary,
+.error-list {
+  gap: 8px;
+}
+.provider-row,
+.error-row {
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+.error-row {
+  grid-template-columns: 128px minmax(0, 1fr) auto;
+}
+.disk-card {
+  min-height: 116px;
+}

@@ -1,17 +1,19 @@
-import { renderShell, setChromeVisible, guard } from './layout.js';
+import { renderShell, setChromeVisible, guard } from './layout.js?v=web-studio-2c';
 import * as router from './router.js';
 import { clearSession } from './auth.js';
 import { setUnauthorizedHandler } from './api.js';
-import { render as renderLogin } from './pages/login.js';
-import { render as renderDashboard } from './pages/dashboard.js';
-import { render as renderGenImage } from './pages/generate-image.js';
+import { el, mount } from './components/dom.js';
+import { initTheme } from './lib/theme.js';
+import { render as renderLogin } from './pages/login.js?v=web-studio-2c';
+import { render as renderDashboard } from './pages/dashboard.js?v=web-studio-2c';
+import { render as renderGenImage } from './pages/generate-image.js?v=web-studio-2c';
 import { render as renderGenVideo } from './pages/generate-video.js';
-import { render as renderJobsList } from './pages/jobs-list.js';
+import { render as renderJobsList } from './pages/jobs-list.js?v=web-studio-2c';
 import { render as renderJobsDetail } from './pages/jobs-detail.js';
-import { render as renderAssetsList } from './pages/assets-list.js';
+import { render as renderAssetsList } from './pages/assets-list.js?v=web-studio-2c';
 import { render as renderAssetsDetail } from './pages/assets-detail.js';
-import { render as renderProviders } from './pages/providers.js';
-import { render as renderGatewayKeys } from './pages/gateway-keys.js';
+import { render as renderProviders } from './pages/providers.js?v=web-studio-2c';
+import { render as renderGatewayKeys } from './pages/gateway-keys.js?v=web-studio-2c';
 import { render as renderDiagnostics } from './pages/diagnostics.js';
 
 function content() { return document.getElementById('content'); }
@@ -19,7 +21,8 @@ function content() { return document.getElementById('content'); }
 function wrapLogin(fn) {
   return async (params) => {
     setChromeVisible(false);
-    content().innerHTML = '';
+    document.body.classList.add('is-login');
+    mount(content());
     await fn(params);
   };
 }
@@ -30,9 +33,10 @@ function wrapAuth(fn) {
       setChromeVisible(false);
       return;
     }
+    document.body.classList.remove('is-login');
     renderShell();
     setChromeVisible(true);
-    content().innerHTML = '';
+    mount(content());
     await fn(params);
   };
 }
@@ -42,9 +46,17 @@ async function notFound() {
     setChromeVisible(false);
     return;
   }
+  document.body.classList.remove('is-login');
   renderShell();
   setChromeVisible(true);
-  content().innerHTML = '<div class="card"><h2>404 Not Found</h2><p>The page you requested does not exist.</p></div>';
+  mount(content(),
+    el('section', { class: 'panel' },
+      el('div', { class: 'panel-body' },
+        el('h2', {}, '404 Not Found'),
+        el('p', { class: 'text-muted' }, 'The page you requested does not exist.'),
+      ),
+    ),
+  );
 }
 
 setUnauthorizedHandler(() => {
@@ -68,5 +80,6 @@ router.onNotFound(notFound);
 
 if (!location.hash) location.hash = '#/dashboard';
 
+initTheme();
 renderShell();
 router.start();

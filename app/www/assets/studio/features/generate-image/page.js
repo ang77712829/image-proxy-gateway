@@ -7,10 +7,13 @@ import { field, input, select, textarea } from '../../components/forms.js';
 import { pageHeader, panel, metaGrid } from '../../components/page.js';
 import { emptyState, errorState, loadingState } from '../../components/states.js';
 import { toast } from '../../components/toast.js';
+import { showWipFeature } from '../../components/wip.js';
 import { IMAGE_SIZE_PRESETS, isSelectableImageProvider, providerModelValue, providersFromResponse, validateCustomSize } from '../../lib/capabilities.js';
 import { safeAssetHref, buildAssetDownloadName } from '../../lib/asset-url.js';
 import { errorDiagnostics, safeErrorMessage } from '../../lib/safe-error.js';
 import { formatDate, formatDuration, shortId, truncateText } from '../../lib/format.js';
+import { safeText } from '../../lib/security.js';
+import { navigate } from '../../router.js';
 
 function imageUrlFromResult(result) {
   const item = Array.isArray(result?.data) ? result.data[0] : null;
@@ -40,13 +43,13 @@ function recentJobCard(job) {
     el('div', { class: 'job-card-header' },
       el('div', {},
         el('p', { class: 'card-title' }, shortId(job.id)),
-        el('p', { class: 'card-subtitle' }, truncateText(job.prompt || '-', 72)),
+        el('p', { class: 'card-subtitle' }, truncateText(safeText(job.prompt || '-', 160), 72)),
       ),
       statusBadge(job.status, t(`jobs.${job.status}`)),
     ),
     metaGrid([
-      { label: t('jobs.provider'), value: job.provider || '-' },
-      { label: t('jobs.model'), value: job.model || '-' },
+      { label: t('jobs.provider'), value: safeText(job.provider || '-', 80) },
+      { label: t('jobs.model'), value: safeText(job.model || '-', 80) },
       { label: t('jobs.created'), value: formatDate(job.created_at) },
     ]),
   );
@@ -79,7 +82,7 @@ function renderResultSuccess(target, result, prompt) {
       el('div', { class: 'job-card-header' },
         el('div', {},
           el('p', { class: 'card-title' }, t('generateImage.success')),
-          el('p', { class: 'card-subtitle' }, truncateText(prompt, 120)),
+          el('p', { class: 'card-subtitle' }, truncateText(safeText(prompt, 240), 120)),
         ),
         badge(t('jobs.succeeded'), 'success'),
       ),
@@ -89,8 +92,8 @@ function renderResultSuccess(target, result, prompt) {
         download: buildAssetDownloadName(assetLike),
       }) : null,
       metaGrid([
-        { label: t('generateImage.provider'), value: result.provider },
-        { label: t('generateImage.model'), value: result.model },
+        { label: t('generateImage.provider'), value: safeText(result.provider, 80) },
+        { label: t('generateImage.model'), value: safeText(result.model, 80) },
         { label: t('generateImage.jobId'), value: result.job_id },
         { label: t('generateImage.historyId'), value: result.history_id },
         { label: t('generateImage.duration'), value: result.duration_ms ? formatDuration(result.duration_ms) : '' },
@@ -222,22 +225,36 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
       kicker: t('generateImage.kicker'),
       title: t('generateImage.title'),
       subtitle: t('generateImage.subtitle'),
+      actions: [
+        button(t('generateImage.videoWipAction'), { onClick: () => navigate('#/generate/video') }),
+        button(t('generateImage.promptCopilotAction'), {
+          onClick: () => showWipFeature({ title: t('wip.promptCopilotTitle') }),
+        }),
+      ],
     }),
     el('div', { class: 'generate-grid' },
-      panel({ title: t('generateImage.title') },
+      panel({ title: t('generateImage.title'), className: 'creator-panel' },
         el('div', { class: 'panel-body form-stack' },
           field(t('generateImage.prompt'), promptInput, { className: 'span-2' }),
           el('div', { class: 'form-grid' },
-            field(t('generateImage.provider'), providerSelect, { help: providerStatus.textContent }),
+            field(t('generateImage.provider'), providerSelect),
             field(t('generateImage.model'), modelInput),
             field(t('generateImage.size'), sizeSelect),
             field(t('generateImage.customSize'), customSizeInput),
           ),
-          providerStatus,
-          el('div', { class: 'action-row' }, submit),
+          el('div', { class: 'hint-box' }, el('span', {}, 'i'), providerStatus),
+          el('div', { class: 'action-row creator-actions' },
+            button(t('generateImage.promptCopilotAction'), {
+              onClick: () => showWipFeature({ title: t('wip.promptCopilotTitle') }),
+            }),
+            button(t('generateImage.routeAdviceAction'), {
+              onClick: () => showWipFeature({ title: t('wip.planningTitle') }),
+            }),
+            submit,
+          ),
         ),
       ),
-      panel({ title: t('generateImage.preview') },
+      panel({ title: t('generateImage.preview'), className: 'preview-panel' },
         el('div', { class: 'panel-body' }, resultPanel),
       ),
     ),

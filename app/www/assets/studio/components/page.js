@@ -24,9 +24,9 @@ export function panel({ title = '', subtitle = '', className = '', actions = [] 
   );
 }
 
-export function metricCard({ label, value, meta = '', tone = 'teal' }) {
+export function metricCard({ label, value, meta = '', tone = 'teal', icon = '' }) {
   return el('article', { class: `metric-card metric-${tone}` },
-    el('span', { class: 'metric-dot' }),
+    icon ? el('span', { class: 'metric-icon' }, icon) : el('span', { class: 'metric-dot' }),
     el('p', { class: 'metric-label' }, label),
     el('p', { class: 'metric-value' }, value),
     meta ? el('p', { class: 'metric-meta' }, meta) : null,
