@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import unittest
@@ -770,6 +771,20 @@ from angemedia_gateway.media import _send_public_get
 
 class SendPublicGetRedirectTest(unittest.TestCase):
     """_send_public_get redirect 链路安全测试。"""
+
+    def setUp(self):
+        self._real_getaddrinfo = socket.getaddrinfo
+
+        def _host_sensitive_getaddrinfo(host, port, *args, **kwargs):
+            if host == "example.com":
+                return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", port))]
+            return self._real_getaddrinfo(host, port, *args, **kwargs)
+
+        self._patcher = patch("socket.getaddrinfo", side_effect=_host_sensitive_getaddrinfo)
+        self._patcher.start()
+
+    def tearDown(self):
+        self._patcher.stop()
 
     def _make_fake_client(self, redirects):
         """创建 fake AsyncClient，按 redirects 列表返回 302，最后一个返回 200。"""
