@@ -66,8 +66,13 @@ class CreateJobTest(_JobsCrudTestBase):
             "external_task_id", "created_at", "updated_at",
             "started_at", "completed_at", "duration_ms",
             "request_hash", "request_hash_version",
+            "error_category", "human_hint", "retryable", "gateway_stage",
         }
         self.assertEqual(set(job.keys()), expected)
+        self.assertIsNone(job["error_category"])
+        self.assertIsNone(job["human_hint"])
+        self.assertEqual(job["retryable"], 0)
+        self.assertIsNone(job["gateway_stage"])
 
     def test_old_call_defaults_request_hash_fields_to_null(self) -> None:
         """旧 create_job 调用不需要传 request_hash。"""
