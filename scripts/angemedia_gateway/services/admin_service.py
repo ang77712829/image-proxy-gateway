@@ -426,19 +426,16 @@ class AdminService:
     async def provider_status(self) -> dict[str, Any]:
         built_in = self.builtin_provider_rows()
         custom_status: list[dict[str, Any]] = []
-        for provider in self.custom_provider_status_rows(include_secret=True):
+        for provider in self.custom_provider_status_rows(include_secret=False):
             item = dict(provider)
             for key in ("status_url", "quota_url"):
                 url = provider.get(key)
                 if not url:
                     continue
                 url = ensure_public_http_url(str(url))
-                headers = {}
-                if provider.get("_api_key"):
-                    headers["Authorization"] = f"Bearer {provider['_api_key']}"
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
-                        resp = await client.get(url, headers=headers)
+                        resp = await client.get(url, headers={})
                     item[key.replace("_url", "")] = {
                         "ok": resp.status_code < 400,
                         "status_code": resp.status_code,

@@ -21,7 +21,10 @@ os.environ.setdefault("PUBLIC_BASE_URL", "http://testserver")
 os.environ.setdefault("AUTO_DOWNLOAD_GENERATED", "false")
 os.environ.setdefault("SILICONFLOW_API_KEY", "sf-test-secret-value")
 
+from fastapi import HTTPException  # noqa: E402
+
 import angemedia_gateway.config as C  # noqa: E402
+from angemedia_gateway.routes import media as media_routes  # noqa: E402
 from angemedia_gateway.schemas import VideoRequest  # noqa: E402
 from angemedia_gateway.services.media_service import (  # noqa: E402
     MediaService,
@@ -396,6 +399,65 @@ class VideoJobSecretLeakTest(_VideoJobTestBase):
         if "job_id" in result:
             job = get_job(result["job_id"])
             self.assertNotIn(C.SILICONFLOW_API_KEY, job["input_json"])
+
+
+class VideoRouteExceptionDetailSafetyTest(_VideoJobTestBase):
+    """视频路由异常 detail 脱敏与截断。"""
+
+    def _assert_redacted_and_truncated_detail(self, detail: str, prefix: str, secret: str, bearer_token: str) -> None:
+        self.assertTrue(detail.startswith(prefix), detail)
+        suffix = detail[len(prefix):]
+        self.assertLessEqual(len(suffix), 500)
+        self.assertNotIn(secret, detail)
+        self.assertNotIn(bearer_token, detail)
+        self.assertNotIn("TAIL_SHOULD_BE_TRUNCATED", detail)
+        self.assertIn("***REDACTED***", detail)
+
+    def test_create_video_exception_detail_redacted_and_truncated(self) -> None:
+        """POST /v1/videos 异常 detail 不回显原始 secret，并有 500 字符截断。"""
+        secret = "sk-video-create-secret-token-1234567890"
+        bearer_token = "video-create-bearer-token-1234567890"
+        exc_text = (
+            f"upstream rejected {secret}; Authorization: Bearer {bearer_token}; "
+            + ("x" * 700)
+            + "TAIL_SHOULD_BE_TRUNCATED"
+        )
+        mock_create = AsyncMock(side_effect=RuntimeError(exc_text))
+
+        with patch.object(media_routes.media_service, "create_video", mock_create):
+            with self.assertRaises(HTTPException) as caught:
+                await_compat(media_routes._create_video_response(self._make_request()))
+
+        self.assertEqual(caught.exception.status_code, 502)
+        self._assert_redacted_and_truncated_detail(
+            str(caught.exception.detail),
+            "Agnes AI 视频生成失败：",
+            secret,
+            bearer_token,
+        )
+
+    def test_get_video_exception_detail_redacted_and_truncated(self) -> None:
+        """GET /v1/videos/{task_id} 异常 detail 不回显原始 secret，并有 500 字符截断。"""
+        secret = "sk-video-get-secret-token-1234567890"
+        bearer_token = "video-get-bearer-token-1234567890"
+        exc_text = (
+            f"poll failed {secret}; Authorization: Bearer {bearer_token}; "
+            + ("x" * 700)
+            + "TAIL_SHOULD_BE_TRUNCATED"
+        )
+        mock_get = AsyncMock(side_effect=RuntimeError(exc_text))
+
+        with patch.object(media_routes.media_service, "get_video", mock_get):
+            with self.assertRaises(HTTPException) as caught:
+                await_compat(media_routes._get_video_response("route-task-001"))
+
+        self.assertEqual(caught.exception.status_code, 502)
+        self._assert_redacted_and_truncated_detail(
+            str(caught.exception.detail),
+            "Agnes AI 视频任务查询失败：",
+            secret,
+            bearer_token,
+        )
 
 
 # ── 15. GET /v1/videos/{task_id} 未修改 ───────────────

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -22,8 +23,10 @@ os.environ.setdefault("ADMIN_DEFAULT_PASSWORD", "admin123456")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+import angemedia_gateway.config as C  # noqa: E402
 from angemedia_gateway.server import app  # noqa: E402
 from angemedia_gateway.services.admin_service import AssistantModelFetchError, ProviderModelFetchError  # noqa: E402
+from angemedia_gateway.state import ensure_default_admin_user, init_db, verify_admin_login  # noqa: E402
 
 
 SAFE_PROVIDER_SUMMARY_FIELDS = {
@@ -204,6 +207,31 @@ class AdminApiWriteTest(unittest.TestCase):
                 if post_error is not None:
                     raise post_error
                 return response or AdminApiWriteTest.AssistantHttpResponse()
+
+        return patch("angemedia_gateway.services.admin_service.httpx.AsyncClient", new=FakeAsyncClient), instances
+
+    def patch_provider_status_async_client(
+        self,
+        response: AssistantHttpResponse | None = None,
+    ) -> tuple[Any, list[Any]]:
+        instances: list[Any] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.gets: list[dict[str, Any]] = []
+                instances.append(self)
+
+            async def __aenter__(self) -> "FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+                return None
+
+            async def get(self, url: str, headers: dict[str, str] | None = None) -> Any:
+                self.gets.append({"url": url, "headers": headers or {}})
+                return response or AdminApiWriteTest.AssistantHttpResponse(status_code=200, text='{"ok":true}')
 
         return patch("angemedia_gateway.services.admin_service.httpx.AsyncClient", new=FakeAsyncClient), instances
 
@@ -664,6 +692,42 @@ class AdminApiWriteTest(unittest.TestCase):
         self.assertEqual(mock_row["category"], "图片")
         self.assertIn("mock", mock_row["aliases"])
 
+    def test_provider_status_and_quota_requests_do_not_send_provider_api_key(self) -> None:
+        """status_url / quota_url 外呼不应携带 provider API key。"""
+        provider_id = self.unique_provider_id("status-auth")
+        provider_secret = f"sk-{provider_id}-secret-token-123456"
+        self.created_provider_ids.append(provider_id)
+        response = self.client.post(
+            "/v1/admin/providers",
+            json={
+                "id": provider_id,
+                "name": "Status Auth Provider",
+                "provider_type": "openai_image",
+                "base_url": "https://example.com/v1",
+                "api_key": provider_secret,
+                "default_model": "safe-model",
+                "status_url": "https://example.com/status",
+                "quota_url": "https://example.com/quota",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        client_patch, instances = self.patch_provider_status_async_client()
+        with client_patch:
+            status_response = self.client.get("/v1/admin/provider-status")
+
+        self.assertEqual(status_response.status_code, 200, status_response.text)
+        self.assertNotIn(provider_secret, status_response.text)
+        calls = [call for instance in instances for call in instance.gets]
+        requested_urls = {call["url"] for call in calls}
+        self.assertIn("https://example.com/status", requested_urls)
+        self.assertIn("https://example.com/quota", requested_urls)
+        for call in calls:
+            rendered_headers = json.dumps(call["headers"], sort_keys=True)
+            self.assertNotIn("Authorization", call["headers"])
+            self.assertNotIn(provider_secret, rendered_headers)
+            self.assertNotIn(f"Bearer {provider_secret}", rendered_headers)
+
     def test_mock_provider_not_polluting_custom_providers(self) -> None:
         """验证 Mock Provider 不污染 custom providers 列表。"""
         response = self.client.get("/v1/admin/providers")
@@ -792,6 +856,55 @@ class AdminApiWriteTest(unittest.TestCase):
         sorted_response = self.client.post(f"/v1/admin/providers/{provider_id}/sort", json={"sort_order": 222})
         self.assertEqual(sorted_response.status_code, 200, sorted_response.text)
         self.assert_provider_safe_summary(sorted_response.json()["data"], api_key_configured=True)
+
+
+class DefaultAdminPasswordPolicyTest(unittest.TestCase):
+    def test_admin_default_password_env_remains_compatible(self) -> None:
+        original_db = C.DB_FILE
+        with tempfile.TemporaryDirectory(prefix="admin-default-password-test-") as tmp_dir:
+            C.DB_FILE = Path(tmp_dir) / "test.db"
+            try:
+                with patch.dict(os.environ, {"ADMIN_USERNAME": "admin", "ADMIN_DEFAULT_PASSWORD": "compatible-admin-secret"}):
+                    init_db()
+                    ensure_default_admin_user()
+                    self.assertTrue(verify_admin_login("admin", "compatible-admin-secret"))
+                    self.assertFalse(verify_admin_login("admin", "admin123456"))
+            finally:
+                C.DB_FILE = original_db
+
+    def test_admin_default_password_unset_does_not_use_legacy_default(self) -> None:
+        original_db = C.DB_FILE
+        with tempfile.TemporaryDirectory(prefix="admin-random-password-test-") as tmp_dir:
+            C.DB_FILE = Path(tmp_dir) / "test.db"
+            try:
+                with patch.dict(os.environ, {"ADMIN_USERNAME": "admin"}, clear=False):
+                    os.environ.pop("ADMIN_DEFAULT_PASSWORD", None)
+                    init_db()
+                    with self.assertLogs("angemedia-gateway", level="WARNING") as captured:
+                        ensure_default_admin_user()
+                    self.assertFalse(verify_admin_login("admin", "admin123456"))
+                    log_text = "\n".join(captured.output)
+                    self.assertIn("generated initial password", log_text)
+                    self.assertNotIn("admin123456", log_text)
+            finally:
+                C.DB_FILE = original_db
+
+    def test_admin_default_password_empty_generates_random_password(self) -> None:
+        original_db = C.DB_FILE
+        with tempfile.TemporaryDirectory(prefix="admin-empty-password-test-") as tmp_dir:
+            C.DB_FILE = Path(tmp_dir) / "test.db"
+            try:
+                with patch.dict(os.environ, {"ADMIN_USERNAME": "admin", "ADMIN_DEFAULT_PASSWORD": ""}, clear=False):
+                    init_db()
+                    with self.assertLogs("angemedia-gateway", level="WARNING") as captured:
+                        ensure_default_admin_user()
+                    self.assertFalse(verify_admin_login("admin", "admin123456"))
+                    self.assertFalse(verify_admin_login("admin", ""))
+                    log_text = "\n".join(captured.output)
+                    self.assertIn("generated initial password", log_text)
+                    self.assertNotIn("admin123456", log_text)
+            finally:
+                C.DB_FILE = original_db
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import logging
+import secrets
 import sqlite3
 import time
 import uuid
@@ -68,6 +70,8 @@ from .repositories.jobs import (
     update_job_status,
 )
 from .security import generate_session_token, hash_password, hash_token, validate_task_id, verify_password
+
+log = logging.getLogger("angemedia-gateway")
 
 
 def init_db() -> None:
@@ -445,11 +449,18 @@ def clear_generations() -> None:
 def ensure_default_admin_user() -> None:
     """首次启动时创建默认管理员。密码只以哈希形式写入数据库。"""
     username = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
-    default_password = os.getenv("ADMIN_DEFAULT_PASSWORD", "admin123456")
     with closing(db_connect()) as conn:
         row = conn.execute("SELECT username FROM admin_users LIMIT 1").fetchone()
         if row is not None:
             return
+        default_password = (os.getenv("ADMIN_DEFAULT_PASSWORD") or "").strip()
+        if not default_password:
+            default_password = secrets.token_urlsafe(16)
+            log.warning(
+                "Created default admin user %s with generated initial password: %s",
+                username,
+                default_password,
+            )
         conn.execute(
             "INSERT INTO admin_users(username,password_hash,created_at,updated_at) VALUES(?,?,?,?)",
             (username, hash_password(default_password), now_iso(), now_iso()),

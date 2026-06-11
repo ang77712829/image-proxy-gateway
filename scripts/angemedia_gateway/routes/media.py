@@ -75,7 +75,8 @@ async def _create_video_response(req: VideoRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         log.exception("Agnes AI 视频生成失败")
-        raise HTTPException(status_code=502, detail=f"Agnes AI 视频生成失败：{exc}") from exc
+        error_msg = redact_secret_text(str(exc))[:500]
+        raise HTTPException(status_code=502, detail=f"Agnes AI 视频生成失败：{error_msg}") from exc
 
 
 async def _get_video_response(task_id: str) -> dict[str, Any]:
@@ -85,7 +86,8 @@ async def _get_video_response(task_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         log.exception("Agnes AI 视频任务查询失败")
-        raise HTTPException(status_code=502, detail=f"Agnes AI 视频任务查询失败：{redact_secret_text(str(exc))}") from exc
+        error_msg = redact_secret_text(str(exc))[:500]
+        raise HTTPException(status_code=502, detail=f"Agnes AI 视频任务查询失败：{error_msg}") from exc
 
 
 @router.get("/health")
