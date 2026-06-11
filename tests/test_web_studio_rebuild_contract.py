@@ -1,0 +1,107 @@
+"""WEB-REBUILD-1 frontend source contracts."""
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+STUDIO_ROOT = ROOT / "app" / "www" / "assets" / "studio"
+LAYOUT_JS = STUDIO_ROOT / "layout.js"
+APP_JS = STUDIO_ROOT / "app.js"
+I18N_JS = STUDIO_ROOT / "i18n.js"
+ASSETS_PAGE_JS = STUDIO_ROOT / "features" / "assets" / "page.js"
+JOBS_PAGE_JS = STUDIO_ROOT / "features" / "jobs" / "page.js"
+PROVIDERS_PAGE_JS = STUDIO_ROOT / "features" / "providers" / "page.js"
+KEYS_PAGE_JS = STUDIO_ROOT / "features" / "gateway-keys" / "page.js"
+WIP_PAGE_JS = STUDIO_ROOT / "features" / "wip" / "page.js"
+CAPABILITIES_JS = STUDIO_ROOT / "lib" / "capabilities.js"
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def studio_sources() -> dict[Path, str]:
+    return {path: read(path) for path in STUDIO_ROOT.rglob("*.js")}
+
+
+class WebStudioRebuildSourceContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.layout_source = read(LAYOUT_JS)
+        cls.app_source = read(APP_JS)
+        cls.i18n_source = read(I18N_JS)
+        cls.assets_source = read(ASSETS_PAGE_JS)
+        cls.jobs_source = read(JOBS_PAGE_JS)
+        cls.providers_source = read(PROVIDERS_PAGE_JS)
+        cls.keys_source = read(KEYS_PAGE_JS)
+        cls.wip_source = read(WIP_PAGE_JS)
+        cls.capabilities_source = read(CAPABILITIES_JS)
+
+    def test_formal_nav_contains_only_product_rc_entries(self) -> None:
+        nav_routes = set(re.findall(r"hash:\s*['\"]([^'\"]+)['\"]", self.layout_source))
+        self.assertEqual(
+            nav_routes,
+            {
+                "#/dashboard",
+                "#/generate/image",
+                "#/jobs",
+                "#/assets",
+                "#/providers",
+                "#/gateway-keys",
+            },
+        )
+
+    def test_wip_routes_are_registered_and_render_unavailable_message(self) -> None:
+        for route in ("#/generate/video", "#/diagnostics", "#/jobs/:id", "#/assets/:id"):
+            with self.subTest(route=route):
+                self.assertIn(f"router.register('{route}'", self.app_source)
+        self.assertIn("renderUnavailable", self.wip_source)
+        self.assertIn("wip.message", self.wip_source)
+        self.assertIn("当前版本暂未开放", self.i18n_source)
+
+    def test_no_saas_concepts_or_frontend_frameworks(self) -> None:
+        forbidden = ("team", "billing", "workspace", "organization", "subscription", "React", "Vue", "Svelte")
+        for path, source in studio_sources().items():
+            with self.subTest(path=str(path.relative_to(ROOT))):
+                for term in forbidden:
+                    self.assertNotIn(term, source)
+
+    def test_assets_use_real_download_delete_and_no_filesystem_path_display(self) -> None:
+        self.assertIn("buildAssetDownloadName", self.assets_source)
+        self.assertIn("api.delete(`/assets/${encodeURIComponent(asset.id)}`)", self.assets_source)
+        self.assertIn("assets.editUnavailable", self.assets_source)
+        self.assertNotIn("local_path", self.assets_source)
+        self.assertIn("assetDisplayName", self.assets_source)
+
+    def test_gateway_keys_hide_revoked_by_default_and_never_list_full_secret(self) -> None:
+        self.assertIn("let showRevoked = false", self.keys_source)
+        self.assertIn("showRevoked || !item.revoked_at", self.keys_source)
+        self.assertIn("oneTimeSecret", self.keys_source)
+        self.assertNotRegex(self.keys_source, r"item\.key\b")
+        self.assertIn("key_hash", self.keys_source)
+        self.assertIn("CREATE_FORBIDDEN_FIELDS", self.keys_source)
+
+    def test_jobs_consume_structured_diagnostics(self) -> None:
+        for field in ("human_hint", "error_category", "retryable", "gateway_stage"):
+            with self.subTest(field=field):
+                self.assertIn(field, self.jobs_source)
+        self.assertIn("safeText(job.error_message", self.jobs_source)
+
+    def test_providers_do_not_expose_deferred_admin_actions(self) -> None:
+        for term in ("Test", "Edit", "Delete", "Sort", "Fallback", "/test", "/sort", "/fallback"):
+            with self.subTest(term=term):
+                self.assertNotIn(term, self.providers_source)
+        self.assertIn("/enabled", self.providers_source)
+        self.assertIn("type: 'password'", self.providers_source)
+
+    def test_generate_image_custom_size_contract(self) -> None:
+        self.assertIn("validateCustomSize", self.capabilities_source)
+        self.assertIn("1024x1024", self.capabilities_source)
+        self.assertIn("custom", self.capabilities_source)
+
+
+if __name__ == "__main__":
+    unittest.main()

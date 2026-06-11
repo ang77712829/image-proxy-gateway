@@ -7,7 +7,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATE_IMAGE_JS = ROOT / "app" / "www" / "assets" / "studio" / "pages" / "generate-image.js"
+GENERATE_IMAGE_JS = ROOT / "app" / "www" / "assets" / "studio" / "features" / "generate-image" / "page.js"
+CAPABILITIES_JS = ROOT / "app" / "www" / "assets" / "studio" / "lib" / "capabilities.js"
+SAFE_ERROR_JS = ROOT / "app" / "www" / "assets" / "studio" / "lib" / "safe-error.js"
 I18N_JS = ROOT / "app" / "www" / "assets" / "studio" / "i18n.js"
 
 
@@ -24,6 +26,8 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.source = read_source(GENERATE_IMAGE_JS)
         cls.compact_source = compact(cls.source)
+        cls.capabilities_source = read_source(CAPABILITIES_JS)
+        cls.safe_error_source = read_source(SAFE_ERROR_JS)
         cls.i18n_source = read_source(I18N_JS)
 
     def test_loads_provider_safe_summary_for_custom_provider_options(self) -> None:
@@ -50,14 +54,11 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
 
     def test_enabled_openai_image_providers_are_the_only_custom_options(self) -> None:
         """Only enabled OpenAI-compatible image providers should be selectable."""
-        self.assertIn("provider_type", self.source)
-        self.assertIn("openai_image", self.source)
-        self.assertRegex(self.source, r"\benabled\b")
-        self.assertRegex(
-            self.source,
-            r"createElement\(\s*['\"]select['\"]\s*\)",
-            "Generate Image should render a provider select.",
-        )
+        self.assertIn("provider_type", self.capabilities_source)
+        self.assertIn("openai_image", self.capabilities_source)
+        self.assertRegex(self.capabilities_source, r"\benabled\b")
+        self.assertIn("providerOptions", self.source)
+        self.assertIn("providerSelect", self.source)
 
     def test_custom_provider_submit_uses_custom_model_id_without_secret_config(self) -> None:
         """Selecting a custom provider should submit model: custom:<id>."""
@@ -96,11 +97,7 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
 
     def test_size_select_defaults_and_payload_are_present(self) -> None:
         """Generate Image should expose a minimal size select and include size in the payload."""
-        self.assertRegex(
-            self.source,
-            r"createElement\(\s*['\"]select['\"]\s*\)",
-            "Generate Image should render a size select.",
-        )
+        self.assertIn("IMAGE_SIZE_PRESETS", self.source)
         self.assertIn("1024x1024", self.source)
         self.assertRegex(
             self.source,
@@ -108,12 +105,20 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
             "The image generation payload should include size.",
         )
 
+    def test_custom_size_validation_is_present(self) -> None:
+        """Generate Image should support validated WIDTHxHEIGHT custom sizes."""
+        self.assertIn("validateCustomSize", self.source)
+        self.assertRegex(self.capabilities_source, r"\^\(\[1-9\]\\d\{1,3\}\)x\(\[1-9\]\\d\{1,3\}\)")
+        self.assertIn("generateImage.sizeInvalidFormat", self.i18n_source)
+        self.assertIn("generateImage.sizeInvalidRange", self.i18n_source)
+
     def test_duplicate_conflict_uses_safe_short_message(self) -> None:
         """HTTP 409 duplicate responses should use a sanitized Generate Image message."""
         handles_duplicate = (
             "duplicate_in_flight_job" in self.source
             or "err.status === 409" in self.compact_source
             or "err.status===409" in self.compact_source
+            or re.search(r"status\s*===\s*409", self.source)
         )
         self.assertTrue(handles_duplicate, "Generate Image should handle duplicate 409 responses explicitly.")
         self.assertIn("generateImage.duplicate", self.i18n_source)
@@ -132,23 +137,10 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
 
 
     def test_generate_image_source_handles_human_hint_from_error_response(self) -> None:
-        """generate-image.js 应能处理 API 错误响应中的 human_hint 字段"""
-        # 当前实现只显示 generateImage.error（通用错误）
-        # 如果 API 返回 human_hint，前端应优先显示 human_hint
-        # 这个测试验证 source 代码是否有可能读取 human_hint
-        # 当前 expect fail: generate-image.js 未显示 human_hint
-
-        # 读取 generate-image.js 源码
-        source = self.source
-
-        # 断言当前实现仍然保留 generateImage.error 作为 fallback
-        self.assertIn("generateImage.error", source,
-                       "generate-image.js 应保留 generateImage.error 作为 fallback")
-
-        # 断言当前实现未读取 human_hint（这是预期的 fail point）
-        # 未来 W-ERR-2A 实现后，这个断言应改为检查 human_hint 处理逻辑
-        self.assertNotIn("human_hint", source,
-                        "generate-image.js 当前未处理 human_hint（需要 W-ERR-2A 实现）")
+        """Generate Image should prefer API human_hint and keep a safe fallback."""
+        self.assertIn("generateImage.error", self.source)
+        self.assertIn("safeErrorMessage", self.source)
+        self.assertIn("human_hint", self.safe_error_source)
 
 if __name__ == "__main__":
     unittest.main()
