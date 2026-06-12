@@ -31,12 +31,6 @@ const PROVIDER_SECRET_RESPONSE_FIELDS = [
 const PROVIDER_PAGE_SIZE = 5;
 
 let providerPage = 1;
-const editingProvider = {
-  providerId: null,
-  set(id) { this.providerId = id; },
-  clear() { this.providerId = null; },
-  get active() { return this.providerId !== null; },
-};
 
 function hasProviderSecretField(item) {
   if (!item || typeof item !== 'object') return false;
@@ -101,7 +95,7 @@ function confirmRemoveProvider(provider, reload) {
   });
 }
 
-function providerCard(provider, reload, setEditProvider) {
+function providerCard(provider, reload) {
   const nextEnabled = !provider.enabled;
   const toggleButton = button(nextEnabled ? t('providers.enableAction') : t('providers.disableAction'), {
     size: 'sm',
@@ -137,11 +131,6 @@ function providerCard(provider, reload, setEditProvider) {
     ),
     el('div', { class: 'action-row provider-compact-actions' },
       toggleButton,
-      button(t('common.edit'), {
-        size: 'sm',
-        variant: 'secondary',
-        onClick: () => setEditProvider(provider.id),
-      }),
       button(t('common.delete'), {
         size: 'sm',
         variant: 'danger',
@@ -152,27 +141,15 @@ function providerCard(provider, reload, setEditProvider) {
 }
 
 function createProviderForm(reload) {
-  const isEdit = editingProvider.active;
-  const editId = editingProvider.providerId;
   const nameInput = input({ name: 'name', type: 'text', maxLength: 80, placeholder: t('providers.namePlaceholder') });
   const typeSelect = select([{ value: 'openai_image', label: t('providers.typeOpenAIImage') }], { name: 'provider_type' });
   const endpointInput = input({ name: 'base_url', type: 'url', placeholder: t('providers.endpointPlaceholder') });
   const modelInput = input({ name: 'default_model', type: 'text', maxLength: 120, placeholder: t('providers.defaultModelPlaceholder') });
-  const secretInput = input({ name: 'api_key', type: 'password', autocomplete: 'new-password', placeholder: isEdit ? t('providers.editSecretPlaceholder') : t('providers.secretPlaceholder') });
-  const enabledToggle = toggle(isEdit ? t('providers.editEnabled') : t('providers.createEnabled'), { name: 'enabled', checked: true });
+  const secretInput = input({ name: 'api_key', type: 'password', autocomplete: 'new-password', placeholder: t('providers.secretPlaceholder') });
+  const enabledToggle = toggle(t('providers.createEnabled'), { name: 'enabled', checked: true });
   const enabledInput = enabledToggle.querySelector('input');
-  const submit = button(isEdit ? t('providers.editSubmit') : t('providers.createSubmit'), { variant: 'primary' });
+  const submit = button(t('providers.createSubmit'), { variant: 'primary' });
   const formError = el('p', { class: 'form-error', hidden: true });
-
-  if (isEdit && editId) {
-    const editing = editingProvider._data;
-    if (editing) {
-      nameInput.value = editing.name || '';
-      endpointInput.value = editing.base_url || '';
-      modelInput.value = editing.default_model || '';
-      enabledInput.checked = !!editing.enabled;
-    }
-  }
 
   function showFormError(message) {
     formError.textContent = safeText(message, 260);
@@ -204,11 +181,8 @@ function createProviderForm(reload) {
       toast(t('providers.createRequired'), 'error');
       return;
     }
-    if (editingProvider.active) {
-      payload.id = editingProvider.providerId;
-    }
     submit.disabled = true;
-    submit.textContent = editingProvider.active ? t('providers.editing') : t('providers.creating');
+    submit.textContent = t('providers.creating');
     try {
       const result = await api.post('/admin/providers', payload);
       if (hasProviderSecretField(result)) {
@@ -216,9 +190,12 @@ function createProviderForm(reload) {
         toast(t('providers.securityError'), 'error');
         return;
       }
-      const wasEdit = editingProvider.active;
-      editingProvider.clear();
-      toast(wasEdit ? t('providers.editSuccess') : t('providers.createSuccess'), 'success');
+      nameInput.value = '';
+      endpointInput.value = '';
+      modelInput.value = '';
+      secretInput.value = '';
+      enabledInput.checked = true;
+      toast(t('providers.createSuccess'), 'success');
       await reload();
     } catch (error) {
       const message = providerCreateErrorMessage(error);
@@ -226,11 +203,11 @@ function createProviderForm(reload) {
       toast(message, 'error');
     } finally {
       submit.disabled = false;
-      submit.textContent = editingProvider.active ? t('providers.editSubmit') : t('providers.createSubmit');
+      submit.textContent = t('providers.createSubmit');
     }
   });
 
-  return panel({ title: editingProvider.active ? t('providers.editSubmit') : t('providers.createTitle'), subtitle: t('providers.subtitle') },
+  return panel({ title: t('providers.createTitle'), subtitle: t('providers.subtitle') },
     el('div', { class: 'panel-body form-stack' },
       el('div', { class: 'form-grid' },
         field(t('providers.name'), nameInput),
@@ -249,12 +226,6 @@ function createProviderForm(reload) {
 function renderProviders(content, providers, reload) {
   const paged = pageSlice(providers, providerPage, PROVIDER_PAGE_SIZE);
   providerPage = paged.current;
-  const setEditProvider = (id) => {
-    const target = providers.find((p) => p.id === id);
-    editingProvider.providerId = id;
-    editingProvider._data = target || null;
-    renderProviders(content, providers, reload);
-  };
 
   mount(content,
     pageHeader({
@@ -267,7 +238,7 @@ function renderProviders(content, providers, reload) {
       createProviderForm(reload),
       panel({ title: t('providers.title'), subtitle: t('providers.advancedNote') },
         el('div', { class: 'providers-content' },
-          providers.length ? el('div', { class: 'provider-list bounded-list' }, paged.items.map((provider) => providerCard(provider, reload, setEditProvider))) :
+          providers.length ? el('div', { class: 'provider-list bounded-list' }, paged.items.map((provider) => providerCard(provider, reload))) :
             emptyState(t('providers.empty')),
         ),
         paginationBar({

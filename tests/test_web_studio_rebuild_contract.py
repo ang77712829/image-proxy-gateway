@@ -91,11 +91,23 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
         self.assertIn("safeText(job.error_message", self.jobs_source)
 
     def test_providers_do_not_expose_deferred_admin_actions(self) -> None:
-        for term in ("Test", "Edit", "Delete", "Sort", "Fallback", "/test", "/sort", "/fallback"):
+        for term in ("Test", "Edit", "Sort", "Fallback", "/test", "/sort", "/fallback"):
             with self.subTest(term=term):
                 self.assertNotIn(term, self.providers_source)
         self.assertIn("/enabled", self.providers_source)
         self.assertIn("type: 'password'", self.providers_source)
+
+    def test_providers_support_custom_delete(self) -> None:
+        """v0.2.0 合同: custom provider delete 必须存在。"""
+        self.assertIn("common.delete", self.providers_source)
+        self.assertIn("/admin/providers/", self.providers_source)
+        self.assertIn("confirmRemoveProvider", self.providers_source)
+
+    def test_providers_no_edit_state_or_logic(self) -> None:
+        """v0.2.0 合同: edit 功能必须不在 providers 页面中。"""
+        for term in ("editingProvider", "editSubmit", "editSecretPlaceholder", "setEditProvider"):
+            with self.subTest(term=term):
+                self.assertNotIn(term, self.providers_source)
 
     def test_generate_image_custom_size_contract(self) -> None:
         self.assertIn("validateCustomSize", self.capabilities_source)
