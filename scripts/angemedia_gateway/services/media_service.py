@@ -1,610 +1,74 @@
-"""Media generation business orchestration."""
+"""Thin facade for media generation orchestration."""
 from __future__ import annotations
 
 import logging
-import time
-import uuid
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
 
-from fastapi.responses import JSONResponse
-
-from .. import config as C
 from ..media import localize_image_result, localize_video_result, maybe_to_b64
-from ..providers.errors import BackendUnavailable, RateLimited
 from ..providers.custom import generate_custom_openai_image
-from ..repositories.jobs import find_recent_job_by_request_hash
-from ..request_hash import compute_request_hash
-from ..request_hash_builders import (
-    RequestHashBuildResult,
-    build_image_request_hash_payload,
-    build_video_request_hash_payload,
-)
-from ..routing import resolve_chain
-from ..schemas import ImageRequest, VideoRequest
-from ..security import redact_secret_text, validate_task_id
-from ..error_diagnostics import classify_provider_error
-from ..helpers import now_iso, safe_json
-from ..repositories.assets import save_asset
 from ..repositories.generations import record_generation
 from ..repositories.jobs import create_job, get_job_by_external_task_id, update_job_status
 from ..repositories.settings import builtin_provider_enabled, get_custom_provider
 from ..repositories.video_tasks import upsert_video_task
+from ..routing import resolve_chain
 from ..runtime import PROVIDERS, agnes_video
+from ..schemas import ImageRequest, VideoRequest
+from .generation_assets import save_generated_asset as _save_generated_asset
+from .image_generation import (
+    CustomProviderNotFound,
+    ImageProvidersFailed,
+    NoImageProviderAvailable,
+    create_image,
+)
+from .job_lifecycle import JobLifecycle
+from .video_generation import VideoProviderDisabled
+from .video_generation import create_video as create_video_orchestration
+from .video_generation import get_video as get_video_orchestration
 
 log = logging.getLogger("angemedia-gateway")
-REQUEST_HASH_VERSION = 1
-DEDUP_ADMISSION_WINDOW_SECONDS = 30 * 60
-IMAGE_ADMISSION_STATUSES = ("queued", "running")
-VIDEO_ADMISSION_STATUSES = ("running",)
-
-
-class CustomProviderNotFound(RuntimeError):
-    """Requested custom provider does not exist."""
-
-
-class NoImageProviderAvailable(RuntimeError):
-    """No enabled image provider can handle the request."""
-
-
-class ImageProvidersFailed(RuntimeError):
-    """All image providers in the resolved chain failed."""
-
-    def __init__(self, errors: list[str]) -> None:
-        super().__init__("all image providers failed")
-        self.errors = errors
-
-
-class VideoProviderDisabled(RuntimeError):
-    """Video provider is disabled in current runtime config."""
-
-
-def _generated_local_paths(result: dict[str, Any], media_type: str) -> list[str]:
-    if media_type == "video":
-        local_path = str(result.get("local_path") or "")
-        return [local_path] if local_path else []
-    data = result.get("data")
-    if not isinstance(data, list):
-        return []
-    paths: list[str] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        local_path = str(item.get("local_path") or "")
-        if local_path:
-            paths.append(local_path)
-    return paths
-
-
-def _generated_output_file(local_path: str) -> Path | None:
-    if not local_path:
-        return None
-    path = Path(local_path)
-    if not path.exists() or not path.is_file():
-        return None
-    try:
-        resolved = path.resolve()
-        resolved.relative_to(C.OUTPUT_DIR.resolve())
-    except (OSError, ValueError):
-        return None
-    return resolved
-
-
-def _generated_output_files(result: dict[str, Any], media_type: str) -> list[Path]:
-    files: list[Path] = []
-    for local_path in _generated_local_paths(result, media_type):
-        path = _generated_output_file(local_path)
-        if path is not None:
-            files.append(path)
-    return files
-
-
-def _save_generated_asset(
-    *,
-    media_type: str,
-    result: dict[str, Any],
-    prompt: str,
-    model: str | None,
-    provider: str | None,
-    duration_ms: int,
-    job_id: str | None = None,
-) -> None:
-    for path in _generated_output_files(result, media_type):
-        filename = path.name
-        save_asset(
-            id=uuid.uuid4().hex,
-            filename=filename,
-            storage_area="output",
-            relative_path=filename,
-            url_path=f"/generated/{filename}",
-            media_type=media_type,
-            source="generated",
-            size=path.stat().st_size,
-            prompt=prompt,
-            model=model,
-            provider=provider,
-            duration_ms=duration_ms,
-            job_id=job_id,
-        )
-
-
-def _request_hash_fields(result: RequestHashBuildResult) -> tuple[str | None, int | None]:
-    if result.payload is None:
-        return None, None
-    return compute_request_hash(result.payload, version=REQUEST_HASH_VERSION), REQUEST_HASH_VERSION
-
-
-def _admission_cutoff_iso() -> str:
-    return (datetime.now(timezone.utc) - timedelta(seconds=DEDUP_ADMISSION_WINDOW_SECONDS)).isoformat()
-
-
-def _duplicate_detail(job: dict[str, Any]) -> dict[str, Any]:
-    from ..error_diagnostics import classify_duplicate_error
-    classification = classify_duplicate_error()
-    return {
-        "code": "duplicate_in_flight_job",
-        "error_category": classification["error_category"],
-        "human_hint": classification["human_hint"],
-        "retryable": classification["retryable"],
-        "gateway_stage": classification["gateway_stage"],
-        "existing_job": {
-            "job_id": job.get("id"),
-            "kind": job.get("kind"),
-            "status": job.get("status"),
-            "created_at": job.get("created_at"),
-        },
-    }
-
-
-def _duplicate_response_if_in_flight(
-    *,
-    kind: str,
-    request_hash: str | None,
-    request_hash_version: int | None,
-    statuses: tuple[str, ...],
-) -> JSONResponse | None:
-    existing = find_recent_job_by_request_hash(
-        kind=kind,
-        request_hash=request_hash,
-        request_hash_version=request_hash_version,
-        statuses=statuses,
-        created_after=_admission_cutoff_iso(),
-    )
-    if existing is not None:
-        return JSONResponse(status_code=409, content={"detail": _duplicate_detail(existing)})
-    return None
-
-
-def _safe_output_json(result: dict[str, Any]) -> str:
-    """构建最小 output_json 摘要，不存储完整 b64 内容。"""
-    data = result.get("data")
-    has_url = False
-    has_b64 = False
-    image_count = 0
-    if isinstance(data, list):
-        image_count = len(data)
-        for item in data:
-            if isinstance(item, dict):
-                if item.get("url"):
-                    has_url = True
-                if item.get("b64_json"):
-                    has_b64 = True
-    summary: dict[str, Any] = {
-        "provider": result.get("provider", ""),
-        "model": result.get("model", ""),
-        "history_id": result.get("history_id", ""),
-        "image_count": image_count,
-        "has_url": has_url,
-        "has_b64_json": has_b64,
-    }
-    if has_url:
-        first = data[0] if isinstance(data, list) and data else {}
-        if isinstance(first, dict) and first.get("url"):
-            summary["url"] = first["url"]
-    return safe_json(summary)
 
 
 class MediaService:
-    async def create_image(self, req: ImageRequest) -> dict[str, Any]:
-        if req.model and req.model.startswith("custom:"):
-            return await self._create_custom_image(req)
-        return await self._create_builtin_image(req)
-
-    async def _create_custom_image(self, req: ImageRequest) -> dict[str, Any]:
-        provider_id = req.model.split(":", 1)[1] if req.model else ""
-        provider = get_custom_provider(provider_id, include_secret=True)
-        if provider is None:
-            raise CustomProviderNotFound(f"自定义渠道不存在：{provider_id}")
-
-        request_hash, request_hash_version = _request_hash_fields(
-            build_image_request_hash_payload(
-                req,
-                provider_mode="custom",
-                custom_provider_id=provider_id,
-                custom_default_model=str(provider.get("default_model") or ""),
-            )
-        )
-        duplicate_response = _duplicate_response_if_in_flight(
-            kind="image",
-            request_hash=request_hash,
-            request_hash_version=request_hash_version,
-            statuses=IMAGE_ADMISSION_STATUSES,
-        )
-        if duplicate_response is not None:
-            return duplicate_response
-
-        job_id: str | None = None
-        try:
-            job_id = create_job(
-                kind="image", status="queued", prompt=req.prompt,
-                input_json=safe_json({"model": req.model, "size": req.size, "response_format": req.response_format}),
-                request_hash=request_hash,
-                request_hash_version=request_hash_version,
-            )["id"]
-        except Exception:
-            log.warning("创建 image job 失败（不影响生成）")
-
-        started_at = now_iso()
-        started = time.perf_counter()
-        if job_id:
-            try:
-                update_job_status(job_id, status="running", provider=f"custom:{provider_id}", model=provider.get("default_model"), started_at=started_at)
-            except Exception:
-                log.warning("更新 image job running 状态失败: job_id=%s", job_id)
-        try:
-            result = await generate_custom_openai_image(req, provider)
-            if req.response_format == "url":
-                result = await localize_image_result(result, f"custom_{provider_id}", provider.get("default_model", "custom"))
-            elif req.response_format == "b64_json":
-                result = await maybe_to_b64(result, req.response_format)
-
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            result["provider"] = f"custom:{provider_id}"
-            result["model"] = str(provider.get("default_model") or f"custom:{provider_id}")
-            result["duration_ms"] = duration_ms
-            record_id = record_generation(
-                media_type="image",
-                prompt=req.prompt,
-                enhanced_prompt=None,
-                model=f"custom:{provider_id}",
-                status="completed",
-                result=result,
-                provider=f"custom:{provider_id}",
-                request_model=req.model,
-                input_mode="custom_provider",
-                duration_ms=duration_ms,
-                started_at=started_at,
-            )
-            _save_generated_asset(
-                media_type="image",
-                result=result,
-                prompt=req.prompt,
-                model=f"custom:{provider_id}",
-                provider=f"custom:{provider_id}",
-                duration_ms=duration_ms,
-                job_id=job_id,
-            )
-            result["history_id"] = record_id
-            if job_id:
-                try:
-                    update_job_status(
-                        job_id, status="succeeded",
-                        output_json=_safe_output_json(result),
-                        completed_at=now_iso(), duration_ms=duration_ms,
-                    )
-                except Exception:
-                    log.warning("更新 image job succeeded 状态失败: job_id=%s", job_id)
-                result["job_id"] = job_id
-            return result
-        except Exception as exc:
-            if job_id:
-                try:
-                    error_msg = redact_secret_text(str(exc))[:500]
-                    classification = classify_provider_error(error_msg)
-                    update_job_status(
-                        job_id, status="failed",
-                        error_code="custom_provider_failure",
-                        error_message=error_msg,
-                        error_category=classification["error_category"],
-                        human_hint=classification["human_hint"],
-                        retryable=1 if classification["retryable"] else 0,
-                        gateway_stage=classification["gateway_stage"],
-                        completed_at=now_iso(),
-                    )
-                except Exception:
-                    log.warning("更新 image job failed 状态失败: job_id=%s", job_id)
-            raise
-
-    async def _create_builtin_image(self, req: ImageRequest) -> dict[str, Any]:
-        chain = resolve_chain(req.model)
-        if not chain:
-            raise NoImageProviderAvailable("当前没有可用图片渠道：所选模型已停用或默认链路全部停用")
-
-        request_hash, request_hash_version = _request_hash_fields(
-            build_image_request_hash_payload(req, provider_mode="builtin", resolved_chain=chain)
-        )
-        duplicate_response = _duplicate_response_if_in_flight(
-            kind="image",
-            request_hash=request_hash,
-            request_hash_version=request_hash_version,
-            statuses=IMAGE_ADMISSION_STATUSES,
-        )
-        if duplicate_response is not None:
-            return duplicate_response
-
-        job_id: str | None = None
-        try:
-            job_id = create_job(
-                kind="image", status="queued", prompt=req.prompt,
-                input_json=safe_json({"model": req.model, "size": req.size, "response_format": req.response_format}),
-                request_hash=request_hash,
-                request_hash_version=request_hash_version,
-            )["id"]
-        except Exception:
-            log.warning("创建 image job 失败（不影响生成）")
-
-        errors: list[str] = []
-        for target in chain:
-            backend = target.provider
-            model = target.model
-            provider = PROVIDERS.get(backend)
-            if provider is None:
-                errors.append(f"{backend}/{model}: unknown provider")
-                continue
-
-            started_at = now_iso()
-            if job_id:
-                try:
-                    update_job_status(job_id, status="running", provider=backend, model=model, started_at=started_at)
-                except Exception:
-                    log.warning("更新 image job running 状态失败: job_id=%s", job_id)
-            try:
-                started = time.perf_counter()
-                result = await provider.generate(req, target)
-                if req.response_format == "url":
-                    result = await localize_image_result(result, backend, model)
-                elif backend != "pollinations":
-                    result = await maybe_to_b64(result, req.response_format)
-
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                result["provider"] = backend
-                result["model"] = model
-                result["request_model"] = req.model or ""
-                result["duration_ms"] = duration_ms
-                record_id = record_generation(
-                    media_type="image",
-                    prompt=req.prompt,
-                    enhanced_prompt=None,
-                    model=model,
-                    status="completed",
-                    result=result,
-                    provider=backend,
-                    request_model=req.model or "",
-                    input_mode="default_chain" if not req.model else "explicit_model",
-                    duration_ms=duration_ms,
-                    started_at=started_at,
-                )
-                _save_generated_asset(
-                    media_type="image",
-                    result=result,
-                    prompt=req.prompt,
-                    model=model,
-                    provider=backend,
-                    duration_ms=duration_ms,
-                    job_id=job_id,
-                )
-                result["history_id"] = record_id
-                if job_id:
-                    try:
-                        update_job_status(
-                            job_id, status="succeeded",
-                            output_json=_safe_output_json(result),
-                            completed_at=now_iso(), duration_ms=duration_ms,
-                        )
-                    except Exception:
-                        log.warning("更新 image job succeeded 状态失败: job_id=%s", job_id)
-                    result["job_id"] = job_id
-                log.info("%s succeeded: model=%s", backend, model)
-                return result
-            except RateLimited as exc:
-                message = f"{backend}/{model}: {exc}"
-                log.warning(message)
-                errors.append(message)
-                continue
-            except BackendUnavailable as exc:
-                message = f"{backend}/{model}: {exc}"
-                log.warning(message)
-                errors.append(message)
-                continue
-            except Exception as exc:
-                message = f"{backend}/{model}: unexpected {type(exc).__name__}: {exc}"
-                log.exception(message)
-                errors.append(message)
-                continue
-
-        if job_id:
-            try:
-                # Classify error from collected errors
-                error_msg = redact_secret_text("; ".join(errors))[:500]
-                classification = classify_provider_error(error_msg)
-                update_job_status(
-                    job_id, status="failed",
-                    error_code="all_providers_failed",
-                    error_message=error_msg,
-                    error_category=classification["error_category"],
-                    human_hint=classification["human_hint"],
-                    retryable=1 if classification["retryable"] else 0,
-                    gateway_stage=classification["gateway_stage"],
-                    completed_at=now_iso(),
-                )
-            except Exception:
-                log.warning("更新 image job failed 状态失败: job_id=%s", job_id)
-        raise ImageProvidersFailed(errors)
-
-    async def create_video(self, req: VideoRequest) -> dict[str, Any]:
-        if not builtin_provider_enabled("agnes_video"):
-            raise VideoProviderDisabled("Agnes 视频渠道已停用，请在管理后台恢复后再生成")
-
-        started_at = now_iso()
-        started = time.perf_counter()
-        request_hash: str | None = None
-        request_hash_version: int | None = None
-        if not req.wait_for_completion:
-            request_hash, request_hash_version = _request_hash_fields(
-                build_video_request_hash_payload(req, provider="agnes_video")
-            )
-            duplicate_response = _duplicate_response_if_in_flight(
-                kind="video",
-                request_hash=request_hash,
-                request_hash_version=request_hash_version,
-                statuses=VIDEO_ADMISSION_STATUSES,
-            )
-            if duplicate_response is not None:
-                return duplicate_response
-        if req.wait_for_completion:
-            result = await agnes_video.generate_video(req)
-            result = await localize_video_result(result)
-            status = str(result.get("status") or "completed")
-        else:
-            result = await agnes_video.submit_task(req)
-            status = str(result.get("status") or "submitted")
-
-        duration_ms = int((time.perf_counter() - started) * 1000)
-        result["provider"] = "agnes_video"
-        result["model"] = req.model
-        result["duration_ms"] = duration_ms
-        task_id = str(result.get("task_id") or result.get("id") or "")
-        if task_id:
-            upsert_video_task(task_id, req.prompt, req.model, status, result, duration_ms=duration_ms)
-
-        # ── job 记录（旁路，仅异步提交路径）───────────────
-        job_id: str | None = None
-        if task_id and not req.wait_for_completion:
-            input_summary: dict[str, Any] = {
-                "model": req.model,
-                "mode": req.mode,
-                "height": req.height,
-                "width": req.width,
-                "num_frames": req.num_frames,
-                "frame_rate": req.frame_rate,
-                "wait_for_completion": req.wait_for_completion,
-                "has_image": bool(req.image or req.images),
-                "image_count": len(req.images) if req.images else (1 if req.image else 0),
-            }
-            try:
-                job_id = create_job(
-                    kind="video",
-                    status="running",
-                    provider="agnes_video",
-                    model=req.model,
-                    prompt=req.prompt,
-                    external_task_id=task_id,
-                    input_json=safe_json(input_summary),
-                    started_at=started_at,
-                    request_hash=request_hash,
-                    request_hash_version=request_hash_version,
-                )["id"]
-            except Exception:
-                log.warning("创建 video job 失败（不影响生成）")
-        # ── end job ─────────────────────────────────────
-
-        record_id = record_generation(
-            media_type="video",
-            prompt=req.prompt,
-            enhanced_prompt=None,
-            model=req.model,
-            status=status,
-            result=result,
-            task_id=task_id or None,
-            provider="agnes_video",
-            request_model=req.model,
-            input_mode=req.mode or ("image" if req.image or req.images else "text"),
-            duration_ms=duration_ms,
-            started_at=started_at,
-        )
-        _save_generated_asset(
-            media_type="video",
-            result=result,
-            prompt=req.prompt,
-            model=req.model,
-            provider="agnes_video",
-            duration_ms=duration_ms,
-        )
-        result["history_id"] = record_id
-        if job_id:
-            result["job_id"] = job_id
-        return result
-
-    async def get_video(self, task_id: str) -> dict[str, Any]:
-        safe_task_id = validate_task_id(task_id)
-        result = await agnes_video.poll_task(safe_task_id)
-        result = await localize_video_result(result)
-        upsert_video_task(
-            safe_task_id,
-            str(result.get("prompt") or ""),
-            str(result.get("model") or "agnes-video-v2.0"),
-            str(result.get("status") or "unknown"),
-            result,
-            duration_ms=int(result.get("duration_ms") or 0),
+    async def create_image(self, req: ImageRequest) -> dict:
+        return await create_image(
+            req,
+            providers=PROVIDERS,
+            resolve_chain_func=resolve_chain,
+            get_custom_provider_func=get_custom_provider,
+            generate_custom_image_func=generate_custom_openai_image,
+            localize_image_result_func=localize_image_result,
+            maybe_to_b64_func=maybe_to_b64,
+            record_generation_func=record_generation,
+            save_generated_asset_func=_save_generated_asset,
+            job_lifecycle=_job_lifecycle(),
         )
 
-        # ── poll 后更新 job（旁路，不阻断主流程）────────
-        poll_status = str(result.get("status") or "").lower()
-        job_id: str | None = None
-        try:
-            job = get_job_by_external_task_id(safe_task_id, kind="video")
-        except Exception:
-            job = None
-            log.warning("查询 video job 失败: task_id=%s", safe_task_id)
-        if job:
-            job_id = job["id"]
-            if poll_status in {"completed", "succeeded", "done"}:
-                output_summary = safe_json({
-                    "provider": result.get("provider", "agnes_video"),
-                    "model": result.get("model", ""),
-                    "task_id": safe_task_id,
-                    "status": poll_status,
-                    "has_video_url": bool(result.get("video_url")),
-                    "video_url": result.get("video_url", ""),
-                })
-                try:
-                    update_job_status(
-                        job_id, status="succeeded",
-                        output_json=output_summary,
-                        completed_at=now_iso(),
-                    )
-                except Exception:
-                    log.warning("更新 video job succeeded 状态失败: job_id=%s", job_id)
-            elif poll_status in {"failed", "error", "cancelled", "canceled"}:
-                try:
-                    update_job_status(
-                        job_id, status="failed",
-                        error_code="video_generation_failed",
-                        error_message=redact_secret_text(str(result.get("error") or result.get("message") or poll_status))[:500],
-                        completed_at=now_iso(),
-                    )
-                except Exception:
-                    log.warning("更新 video job failed 状态失败: job_id=%s", job_id)
-            # queued/submitted/running/processing → 不更新，保持 running
-        # ── end job poll update ─────────────────────────
+    async def create_video(self, req: VideoRequest) -> dict:
+        return await create_video_orchestration(
+            req,
+            agnes_video_provider=agnes_video,
+            builtin_provider_enabled_func=builtin_provider_enabled,
+            localize_video_result_func=localize_video_result,
+            record_generation_func=record_generation,
+            upsert_video_task_func=upsert_video_task,
+            save_generated_asset_func=_save_generated_asset,
+            job_lifecycle=_job_lifecycle(),
+        )
 
-        # ── poll completed 写入 video asset（旁路）──────
-        if poll_status in {"completed", "succeeded", "done"} and result.get("local_path"):
-            try:
-                _save_generated_asset(
-                    media_type="video",
-                    result=result,
-                    prompt=str((job or {}).get("prompt") or result.get("prompt") or ""),
-                    model=str((job or {}).get("model") or result.get("model") or ""),
-                    provider=str((job or {}).get("provider") or result.get("provider") or "agnes_video"),
-                    duration_ms=int(result.get("duration_ms") or 0),
-                    job_id=job_id,
-                )
-            except Exception:
-                log.warning("poll completed 写入 video asset 失败: task_id=%s", safe_task_id)
-        # ── end asset write ─────────────────────────────
+    async def get_video(self, task_id: str) -> dict:
+        return await get_video_orchestration(
+            task_id,
+            agnes_video_provider=agnes_video,
+            localize_video_result_func=localize_video_result,
+            upsert_video_task_func=upsert_video_task,
+            get_job_by_external_task_id_func=get_job_by_external_task_id,
+            save_generated_asset_func=_save_generated_asset,
+            job_lifecycle=_job_lifecycle(),
+        )
 
-        if job_id:
-            result["job_id"] = job_id
-        return result
+
+def _job_lifecycle() -> JobLifecycle:
+    return JobLifecycle(
+        create_job_func=create_job,
+        update_job_status_func=update_job_status,
+        logger=log,
+    )
