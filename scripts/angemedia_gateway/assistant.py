@@ -12,8 +12,8 @@ import httpx
 from fastapi import HTTPException
 
 from . import config as C
-from .providers.base import BackendUnavailable
-from .providers.image import parse_size
+from .providers.errors import BackendUnavailable
+from .providers.parsers import parse_size
 from .routing import (
     MODEL_ALIASES,
     build_route_response,
@@ -24,7 +24,8 @@ from .routing import (
     infer_video_input_mode,
 )
 from .schemas import AssistantRequest, EnhanceRequest, RouteRequest
-from .state import get_config, save_assistant_plan
+from .repositories.assistant_plans import save_assistant_plan
+from .repositories.settings import get_config
 
 
 def assistant_enabled() -> bool:

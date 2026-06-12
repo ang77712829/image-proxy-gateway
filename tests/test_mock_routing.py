@@ -9,7 +9,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from angemedia_gateway.providers.image import build_providers
+from angemedia_gateway.providers.image.registry import build_providers
 from angemedia_gateway.providers.mock import MockImageProvider
 from angemedia_gateway.repositories import settings
 from angemedia_gateway.routing import resolve_chain

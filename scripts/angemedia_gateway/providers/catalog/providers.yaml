@@ -1,0 +1,84 @@
+providers:
+  - id: siliconflow
+    display_name: SiliconFlow
+    media_types: [image]
+    status: release
+    enabled_default: true
+    config_enabled_key: BUILTIN_PROVIDER_SILICONFLOW_ENABLED
+    requires_key: true
+    credential_keys: [SILICONFLOW_API_KEY]
+    adapter_id: siliconflow
+    ui_group: builtin_image
+    notes: Default image chain entry for Kolors.
+
+  - id: modelscope
+    display_name: ModelScope
+    media_types: [image]
+    status: release
+    enabled_default: true
+    config_enabled_key: BUILTIN_PROVIDER_MODELSCOPE_ENABLED
+    requires_key: true
+    credential_keys: [MODELSCOPE_API_KEY]
+    adapter_id: modelscope
+    ui_group: builtin_image
+    notes: Default image chain entry for Qwen, FLUX, and Z-Image models.
+
+  - id: pollinations
+    display_name: Pollinations
+    media_types: [image]
+    status: experimental
+    enabled_default: false
+    config_enabled_key: BUILTIN_PROVIDER_POLLINATIONS_ENABLED
+    requires_key: false
+    credential_keys: [POLLINATIONS_API_KEY]
+    adapter_id: pollinations
+    ui_group: builtin_image
+    notes: Explicit experimental provider only; never part of the default chain.
+
+  - id: openai_image
+    display_name: OpenAI-compatible Image
+    media_types: [image]
+    status: release
+    enabled_default: true
+    config_enabled_key: BUILTIN_PROVIDER_OPENAI_IMAGE_ENABLED
+    requires_key: true
+    credential_keys: [OPENAI_IMAGE_API_KEY, OPENAI_API_KEY]
+    adapter_id: openai_compatible
+    ui_group: builtin_image
+    notes: Explicit OpenAI-compatible image endpoint, not part of the default chain.
+
+  - id: agnes_image
+    display_name: Agnes Image
+    media_types: [image]
+    status: release
+    enabled_default: true
+    config_enabled_key: BUILTIN_PROVIDER_AGNES_IMAGE_ENABLED
+    requires_key: true
+    credential_keys: [AGNES_API_KEY]
+    adapter_id: agnes
+    ui_group: builtin_image
+    notes: Explicit Agnes image provider for v0.2.0.
+
+  - id: agnes_video
+    display_name: Agnes Video
+    media_types: [video]
+    status: release
+    enabled_default: true
+    config_enabled_key: BUILTIN_PROVIDER_AGNES_VIDEO_ENABLED
+    requires_key: true
+    credential_keys: [AGNES_API_KEY]
+    adapter_id: agnes_video
+    ui_group: builtin_video
+    notes: Agnes video is part of the v0.2.0 release path.
+
+  - id: mock
+    display_name: Mock
+    media_types: [image]
+    status: experimental
+    enabled_default: true
+    config_enabled_key: null
+    requires_key: false
+    credential_keys: []
+    adapter_id: mock
+    ui_group: test
+    notes: Test-only image provider with no upstream request.

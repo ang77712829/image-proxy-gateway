@@ -17,22 +17,24 @@ from ..services.admin_service import (
     ProviderModelFetchError,
     ProviderNotFoundError,
 )
-from ..state import (
-    BUILTIN_PROVIDER_CONFIG_KEYS,
+from ..repositories.admin_auth import (
     change_admin_password,
     clear_admin_login_failures,
     create_admin_session,
-    create_gateway_api_key,
     delete_admin_session,
     get_admin_login_lock,
     get_admin_session,
-    get_gateway_api_key,
-    list_gateway_api_keys,
     record_admin_login_failure,
-    revoke_gateway_api_key,
-    update_gateway_api_key,
     verify_admin_login,
 )
+from ..repositories.gateway_keys import (
+    create_gateway_api_key,
+    get_gateway_api_key,
+    list_gateway_api_keys,
+    revoke_gateway_api_key,
+    update_gateway_api_key,
+)
+from ..repositories.settings import BUILTIN_PROVIDER_CONFIG_KEYS
 from ..runtime import client_ip_from_request, now_seconds, require_admin_auth
 
 router = APIRouter()

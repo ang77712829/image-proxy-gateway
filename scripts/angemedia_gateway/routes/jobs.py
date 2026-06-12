@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..runtime import require_auth
 from ..security import redact_secret_text
-from ..state import get_job, list_jobs
+from ..repositories.jobs import get_job, list_jobs
 
 router = APIRouter()
 

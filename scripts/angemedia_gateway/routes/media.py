@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from .. import config as C
-from ..providers.base import BackendUnavailable, RateLimited
+from ..providers.errors import BackendUnavailable, RateLimited
 from ..routing import MODEL_ALIASES, build_route_response
 from ..schemas import ImageRequest, RouteRequest, VideoRequest
 from ..security import redact_secret_text
@@ -19,10 +19,7 @@ from ..services.media_service import (
     NoImageProviderAvailable,
     VideoProviderDisabled,
 )
-from ..state import (
-    builtin_provider_enabled,
-    list_custom_providers,
-)
+from ..repositories.settings import builtin_provider_enabled, list_custom_providers
 from ..runtime import require_auth
 
 log = logging.getLogger("angemedia-gateway")

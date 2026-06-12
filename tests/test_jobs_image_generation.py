@@ -1078,7 +1078,7 @@ class ProviderSafeMessageTest(unittest.TestCase):
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=fake_resp)
         mock_client.get = AsyncMock(return_value=fake_resp)
-        return patch("angemedia_gateway.providers.image.httpx.AsyncClient", return_value=mock_client)
+        return patch("httpx.AsyncClient", return_value=mock_client)
 
     def _mock_httpx_custom(self, fake_resp):
         """创建一个 mock httpx.AsyncClient for custom.py。"""
@@ -1109,9 +1109,9 @@ class ProviderSafeMessageTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.status_code, 500)
 
         with (
-            patch("angemedia_gateway.providers.image.C.SILICONFLOW_API_KEY", "sk-test"),
-            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
-            patch("angemedia_gateway.providers.image.C.KOLORS_SIZES", {"1024x1024"}),
+            patch("angemedia_gateway.config.SILICONFLOW_API_KEY", "sk-test"),
+            patch("angemedia_gateway.config.HTTP_TIMEOUT", 10),
+            patch("angemedia_gateway.config.KOLORS_SIZES", {"1024x1024"}),
         ):
             asyncio.run(run())
 
@@ -1135,9 +1135,9 @@ class ProviderSafeMessageTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.status_code, 500)
 
         with (
-            patch("angemedia_gateway.providers.image.C.OPENAI_IMAGE_API_KEY", "sk-test"),
-            patch("angemedia_gateway.providers.image.C.OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1"),
-            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
+            patch("angemedia_gateway.config.OPENAI_IMAGE_API_KEY", "sk-test"),
+            patch("angemedia_gateway.config.OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1"),
+            patch("angemedia_gateway.config.HTTP_TIMEOUT", 10),
         ):
             asyncio.run(run())
 
@@ -1181,9 +1181,9 @@ class ProviderSafeMessageTest(unittest.TestCase):
                 self.assertNotIn(marker, str(ctx.exception))
 
         with (
-            patch("angemedia_gateway.providers.image.C.SILICONFLOW_API_KEY", "sk-test"),
-            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
-            patch("angemedia_gateway.providers.image.C.KOLORS_SIZES", {"1024x1024"}),
+            patch("angemedia_gateway.config.SILICONFLOW_API_KEY", "sk-test"),
+            patch("angemedia_gateway.config.HTTP_TIMEOUT", 10),
+            patch("angemedia_gateway.config.KOLORS_SIZES", {"1024x1024"}),
         ):
             asyncio.run(run())
 
@@ -1221,9 +1221,11 @@ class ProviderSafeMessageTest(unittest.TestCase):
             "redact_secret_text(resp.text",
         ]
         provider_files = [
-            ROOT / "scripts" / "angemedia_gateway" / "providers" / "image.py",
             ROOT / "scripts" / "angemedia_gateway" / "providers" / "custom.py",
         ]
+        provider_files.extend(
+            sorted((ROOT / "scripts" / "angemedia_gateway" / "providers" / "image").glob("*.py"))
+        )
         for file_path in provider_files:
             source = file_path.read_text(encoding="utf-8")
             for pattern in dangerous_patterns:

@@ -5,9 +5,9 @@ from typing import Any, Optional
 
 from . import config as C
 from .providers.base import RouteTarget
-from .providers.image import parse_size
+from .providers.parsers import parse_size
 from .schemas import EnhanceRequest, RouteRequest
-from .state import builtin_provider_enabled
+from .repositories.settings import builtin_provider_enabled
 
 MODEL_ALIASES: dict[str, RouteTarget] = {
     "kolors": RouteTarget("siliconflow", "Kwai-Kolors/Kolors"),

@@ -1,0 +1,241 @@
+models:
+  - id: kolors
+    provider: siliconflow
+    provider_model: Kwai-Kolors/Kolors
+    media_type: image
+    display_name: Kolors
+    aliases: [kolors]
+    status: release
+    selectable: true
+    default_chain_order: 10
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: [1024x1024, 1024x768, 768x1024]
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [default_chain]
+
+  - id: qwen
+    provider: modelscope
+    provider_model: Qwen/Qwen-Image-2512
+    media_type: image
+    display_name: Qwen Image
+    aliases: [qwen, qwen-image]
+    status: release
+    selectable: true
+    default_chain_order: 20
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: []
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [default_chain]
+
+  - id: flux
+    provider: modelscope
+    provider_model: black-forest-labs/FLUX.1-Krea-dev
+    media_type: image
+    display_name: FLUX Krea
+    aliases: [flux, flux-krea]
+    status: release
+    selectable: true
+    default_chain_order: 30
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: []
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [default_chain]
+
+  - id: z-image
+    provider: modelscope
+    provider_model: Tongyi-MAI/Z-Image
+    media_type: image
+    display_name: Z-Image
+    aliases: [z-image]
+    status: release
+    selectable: true
+    default_chain_order: 40
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: []
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [default_chain]
+
+  - id: z-turbo
+    provider: modelscope
+    provider_model: Tongyi-MAI/Z-Image-Turbo
+    media_type: image
+    display_name: Z-Image Turbo
+    aliases: [z-turbo, z-image-turbo]
+    status: release
+    selectable: true
+    default_chain_order: 50
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: []
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [default_chain]
+
+  - id: pollinations
+    provider: pollinations
+    provider_model: zimage
+    media_type: image
+    display_name: Pollinations
+    aliases: [pollinations]
+    status: experimental
+    selectable: true
+    default_chain_order: null
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: []
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [experimental]
+
+  - id: openai-image
+    provider: openai_image
+    provider_model: gpt-image-2
+    media_type: image
+    display_name: OpenAI-compatible Image
+    aliases: [openai-image, gpt-image-2]
+    status: release
+    selectable: true
+    default_chain_order: null
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: [1024x1024]
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [explicit]
+
+  - id: agnes-2-1
+    provider: agnes_image
+    provider_model: agnes-image-2.1-flash
+    media_type: image
+    display_name: Agnes Image 2.1
+    aliases: [agnes-image, agnes-2.1]
+    status: release
+    selectable: true
+    default_chain_order: null
+    capabilities:
+      text_to_image: true
+      image_to_image: true
+    params: {}
+    size_presets: [1024x1024, 1024x768, 2048x1536]
+    ref_inputs: {}
+    extra_allowlist:
+      - image
+      - images
+      - mask
+      - strength
+      - tags
+      - extra_body
+      - control_image
+      - reference_image
+      - reference_images
+      - input_image
+      - input_images
+      - init_image
+      - mask_image
+      - edit_mode
+      - mode
+      - width
+      - height
+      - steps
+      - guidance_scale
+      - cfg_scale
+      - sampler
+      - scheduler
+    tags: [explicit]
+
+  - id: agnes-2-0
+    provider: agnes_image
+    provider_model: agnes-image-2.0-flash
+    media_type: image
+    display_name: Agnes Image 2.0
+    aliases: [agnes-2.0]
+    status: release
+    selectable: true
+    default_chain_order: null
+    capabilities:
+      text_to_image: true
+      image_to_image: true
+    params: {}
+    size_presets: [1024x1024, 1024x768, 2048x1536]
+    ref_inputs: {}
+    extra_allowlist:
+      - image
+      - images
+      - mask
+      - strength
+      - tags
+      - extra_body
+      - control_image
+      - reference_image
+      - reference_images
+      - input_image
+      - input_images
+      - init_image
+      - mask_image
+      - edit_mode
+      - mode
+      - width
+      - height
+      - steps
+      - guidance_scale
+      - cfg_scale
+      - sampler
+      - scheduler
+    tags: [explicit]
+
+  - id: agnes-video-v2-0
+    provider: agnes_video
+    provider_model: agnes-video-v2.0
+    media_type: video
+    display_name: Agnes Video v2.0
+    aliases: [agnes-video-v2.0]
+    status: release
+    selectable: true
+    default_chain_order: null
+    capabilities:
+      text_to_video: true
+      image_to_video: true
+    params:
+      width: integer
+      height: integer
+      num_frames: integer
+      frame_rate: integer
+      seed: integer
+    size_presets: [1152x768, 768x1152, 2048x1536]
+    ref_inputs:
+      image: optional
+      images: optional
+    extra_allowlist: []
+    tags: [release_path, video]
+
+  - id: mock
+    provider: mock
+    provider_model: mock-model
+    media_type: image
+    display_name: Mock Image
+    aliases: [mock]
+    status: experimental
+    selectable: false
+    default_chain_order: null
+    capabilities:
+      text_to_image: true
+    params: {}
+    size_presets: [1024x1024]
+    ref_inputs: {}
+    extra_allowlist: []
+    tags: [test]

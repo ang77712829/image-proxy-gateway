@@ -1,21 +1,11 @@
-"""SQLite 本地状态库。"""
+"""State repository exports.
+
+Persistence logic lives in focused modules under db/ and repositories/.
+"""
 from __future__ import annotations
 
-import os
-import logging
-import secrets
-import sqlite3
-import time
-import uuid
-from contextlib import closing
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, NamedTuple
-
-from fastapi import HTTPException
-
-from . import config as C
 from .db.connection import db_connect, db_transaction
+from .db.schema import ensure_columns, init_db
 from .helpers import (
     PROVIDER_ID_RE,
     first_result_url,
@@ -24,6 +14,58 @@ from .helpers import (
     safe_json,
     safe_unlink_under,
     validate_provider_id,
+)
+from .repositories.admin_auth import (
+    LoginAttemptResult,
+    change_admin_password,
+    cleanup_admin_security_state,
+    clear_admin_login_failures,
+    create_admin_session,
+    delete_admin_session,
+    ensure_default_admin_user,
+    get_admin_login_lock,
+    get_admin_session,
+    login_attempt_key,
+    purge_expired_admin_sessions,
+    purge_old_admin_login_attempts,
+    record_admin_login_failure,
+    verify_admin_login,
+)
+from .repositories.assets import (
+    delete_asset,
+    get_asset,
+    list_assets,
+    save_asset,
+)
+from .repositories.assistant_plans import save_assistant_plan
+from .repositories.gateway_keys import (
+    create_gateway_api_key,
+    get_gateway_api_key,
+    has_gateway_api_key_records,
+    list_gateway_api_keys,
+    revoke_gateway_api_key,
+    update_gateway_api_key,
+    update_gateway_api_key_last_used,
+    verify_gateway_api_key,
+)
+from .repositories.generations import (
+    clear_generations,
+    clear_generations_and_collect_files,
+    delete_generation_records_for_file,
+    generation_metadata_by_filename,
+    known_generated_local_paths,
+    list_generation_files,
+    record_generation,
+)
+from .repositories.jobs import (
+    _JOB_COLUMNS,
+    create_job,
+    fail_job,
+    find_recent_job_by_request_hash,
+    get_job,
+    get_job_by_external_task_id,
+    list_jobs,
+    update_job_status,
 )
 from .repositories.settings import (
     BUILTIN_PROVIDER_CONFIG_KEYS,
@@ -44,575 +86,85 @@ from .repositories.settings import (
     update_custom_provider_test,
     upsert_custom_provider,
 )
-from .repositories.gateway_keys import (
-    create_gateway_api_key,
-    get_gateway_api_key,
-    has_gateway_api_key_records,
-    list_gateway_api_keys,
-    revoke_gateway_api_key,
-    update_gateway_api_key,
-    update_gateway_api_key_last_used,
-    verify_gateway_api_key,
-)
-from .repositories.assets import (
-    delete_asset,
-    get_asset,
-    list_assets,
-    save_asset,
-)
-from .repositories.jobs import (
-    _JOB_COLUMNS,
-    create_job,
-    fail_job,
-    get_job,
-    get_job_by_external_task_id,
-    list_jobs,
-    update_job_status,
-)
-from .security import generate_session_token, hash_password, hash_token, validate_task_id, verify_password
+from .repositories.table_rows import TABLE_SELECT_SQL, list_rows
+from .repositories.uploads import DeleteUploadResult, delete_upload, save_upload
+from .repositories.video_tasks import upsert_video_task
 
-log = logging.getLogger("angemedia-gateway")
-
-
-def init_db() -> None:
-    with closing(db_connect()) as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS generations (
-                id TEXT PRIMARY KEY,
-                media_type TEXT NOT NULL,
-                prompt TEXT NOT NULL,
-                enhanced_prompt TEXT,
-                model TEXT,
-                status TEXT NOT NULL,
-                result_url TEXT,
-                remote_url TEXT,
-                local_path TEXT,
-                task_id TEXT,
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS video_tasks (
-                task_id TEXT PRIMARY KEY,
-                prompt TEXT,
-                model TEXT,
-                status TEXT NOT NULL,
-                video_url TEXT,
-                remote_video_url TEXT,
-                local_path TEXT,
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS uploads (
-                id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                original_filename TEXT,
-                role TEXT,
-                content_type TEXT,
-                url TEXT NOT NULL,
-                local_path TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS assistant_plans (
-                id TEXT PRIMARY KEY,
-                original_prompt TEXT NOT NULL,
-                media_type TEXT NOT NULL,
-                plan_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS custom_providers (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                provider_type TEXT NOT NULL,
-                base_url TEXT NOT NULL,
-                api_key TEXT,
-                default_model TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                status_url TEXT,
-                quota_url TEXT,
-                notes TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS admin_users (
-                username TEXT PRIMARY KEY,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS admin_sessions (
-                session_hash TEXT PRIMARY KEY,
-                username TEXT NOT NULL,
-                expires_at REAL NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS admin_login_attempts (
-                attempt_key TEXT PRIMARY KEY,
-                fail_count INTEGER NOT NULL,
-                locked_until REAL NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS assets (
-                id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                storage_area TEXT NOT NULL CHECK(storage_area IN ('output', 'upload')),
-                relative_path TEXT NOT NULL,
-                url_path TEXT NOT NULL,
-                media_type TEXT NOT NULL CHECK(media_type IN ('image', 'video')),
-                source TEXT NOT NULL CHECK(source IN ('generated', 'upload')),
-                size INTEGER NOT NULL DEFAULT 0,
-                prompt TEXT,
-                model TEXT,
-                provider TEXT,
-                duration_ms INTEGER,
-                created_at TEXT NOT NULL,
-                job_id TEXT,
-                UNIQUE(storage_area, relative_path)
-            );
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS gateway_api_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT '',
-                key_prefix TEXT NOT NULL,
-                key_hash TEXT NOT NULL UNIQUE,
-                enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
-                note TEXT,
-                created_at TEXT NOT NULL,
-                last_used_at TEXT,
-                last_used_ip TEXT,
-                revoked_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL CHECK(kind IN ('image', 'video')),
-                status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'succeeded', 'failed', 'canceled')),
-                provider TEXT,
-                model TEXT,
-                prompt TEXT,
-                input_json TEXT,
-                output_json TEXT,
-                error_code TEXT,
-                error_message TEXT,
-                external_task_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                started_at TEXT,
-                completed_at TEXT,
-                duration_ms INTEGER,
-                request_hash TEXT,
-                request_hash_version INTEGER
-            );
-            """
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-            ("baseline", now_iso()),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-            ("gateway_api_keys_v1", now_iso()),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-            ("jobs_v1", now_iso()),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-            ("assets_job_id_v1", now_iso()),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?, ?)",
-            ("jobs_request_hash_v1", now_iso()),
-        )
-        ensure_columns(conn)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_kind_request_hash_created_at "
-            "ON jobs(kind, request_hash, created_at)"
-        )
-
-
-def ensure_columns(conn: sqlite3.Connection) -> None:
-    """为旧版本 SQLite 状态库补齐新增列。"""
-    additions = {
-        "generations": {
-            "provider": "TEXT",
-            "request_model": "TEXT",
-            "input_mode": "TEXT",
-            "duration_ms": "INTEGER NOT NULL DEFAULT 0",
-            "started_at": "TEXT",
-            "completed_at": "TEXT",
-        },
-        "video_tasks": {
-            "provider": "TEXT",
-            "duration_ms": "INTEGER NOT NULL DEFAULT 0",
-        },
-        "custom_providers": {
-            "sort_order": "INTEGER NOT NULL DEFAULT 100",
-            "last_test_at": "TEXT",
-            "last_test_status": "TEXT",
-            "last_response_ms": "INTEGER NOT NULL DEFAULT 0",
-            "last_error": "TEXT",
-        },
-        "assets": {
-            "job_id": "TEXT",
-        },
-        "jobs": {
-            "request_hash": "TEXT",
-            "request_hash_version": "INTEGER",
-            "error_category": "TEXT",
-            "human_hint": "TEXT",
-            "retryable": "INTEGER NOT NULL DEFAULT 0",
-            "gateway_stage": "TEXT",
-        },
-    }
-    for table, columns in additions.items():
-        existing = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        for name, ddl in columns.items():
-            if name not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-
-
-def record_generation(
-    media_type: str,
-    prompt: str,
-    enhanced_prompt: str | None,
-    model: str | None,
-    status: str,
-    result: dict[str, Any],
-    task_id: str | None = None,
-    provider: str | None = None,
-    request_model: str | None = None,
-    input_mode: str | None = None,
-    duration_ms: int = 0,
-    started_at: str | None = None,
-) -> str:
-    record_id = uuid.uuid4().hex
-    result_url, remote_url, local_path = first_result_url(result)
-    completed_at = now_iso()
-    started_at = started_at or completed_at
-    with closing(db_connect()) as conn:
-        conn.execute(
-            """
-            INSERT INTO generations(
-                id, media_type, prompt, enhanced_prompt, model, status,
-                result_url, remote_url, local_path, task_id, raw_json, created_at, updated_at,
-                provider, request_model, input_mode, duration_ms, started_at, completed_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """,
-            (
-                record_id, media_type, prompt, enhanced_prompt, model, status,
-                result_url, remote_url, local_path, task_id, safe_json(result), completed_at, completed_at,
-                provider, request_model, input_mode, int(duration_ms or 0), started_at, completed_at,
-            ),
-        )
-    return record_id
-
-
-def upsert_video_task(
-    task_id: str,
-    prompt: str,
-    model: str,
-    status: str,
-    result: dict[str, Any],
-    duration_ms: int = 0,
-) -> None:
-    task_id = validate_task_id(task_id)
-    with closing(db_connect()) as conn:
-        conn.execute(
-            """
-            INSERT INTO video_tasks(task_id,prompt,model,status,video_url,remote_video_url,local_path,raw_json,created_at,updated_at,provider,duration_ms)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(task_id) DO UPDATE SET
-                status=excluded.status,
-                video_url=excluded.video_url,
-                remote_video_url=excluded.remote_video_url,
-                local_path=excluded.local_path,
-                raw_json=excluded.raw_json,
-                provider=excluded.provider,
-                duration_ms=excluded.duration_ms,
-                updated_at=excluded.updated_at
-            """,
-            (
-                task_id, prompt, model, status,
-                str(result.get("video_url") or ""),
-                str(result.get("remote_video_url") or ""),
-                str(result.get("local_path") or ""),
-                safe_json(result), now_iso(), now_iso(), "agnes_video", int(duration_ms or 0),
-            ),
-        )
-
-
-TABLE_SELECT_SQL = {
-    "generations": "SELECT * FROM generations ORDER BY created_at DESC LIMIT ?",
-    "video_tasks": "SELECT * FROM video_tasks ORDER BY created_at DESC LIMIT ?",
-    "uploads": "SELECT * FROM uploads ORDER BY created_at DESC LIMIT ?",
-    "assistant_plans": "SELECT * FROM assistant_plans ORDER BY created_at DESC LIMIT ?",
-}
-
-
-def list_rows(table: str, limit: int = 50) -> list[dict[str, Any]]:
-    sql = TABLE_SELECT_SQL.get(table)
-    if sql is None:
-        raise HTTPException(status_code=400, detail="不支持的表")
-    limit = max(1, min(limit, 200))
-    with closing(db_connect()) as conn:
-        rows = conn.execute(sql, (limit,)).fetchall()
-    return [dict(row) for row in rows]
-
-
-def save_upload(row: dict[str, Any]) -> None:
-    with closing(db_connect()) as conn:
-        conn.execute(
-            "INSERT INTO uploads(id,filename,original_filename,role,content_type,url,local_path,created_at) "
-            "VALUES(:id,:filename,:original_filename,:role,:content_type,:url,:local_path,:created_at)",
-            row,
-        )
-
-
-def save_assistant_plan(plan_id: str, original_prompt: str, media_type: str, plan: dict[str, Any]) -> None:
-    with closing(db_connect()) as conn:
-        conn.execute(
-            "INSERT INTO assistant_plans(id,original_prompt,media_type,plan_json,created_at) VALUES(?,?,?,?,?)",
-            (plan_id, original_prompt, media_type, safe_json(plan), now_iso()),
-        )
-
-
-class DeleteUploadResult(NamedTuple):
-    found: bool
-    file_deleted: bool
-    local_path: str = ""
-
-
-def delete_upload(upload_id: str) -> DeleteUploadResult:
-    with db_transaction(immediate=True) as conn:
-        row = conn.execute("SELECT local_path FROM uploads WHERE id = ?", (upload_id,)).fetchone()
-        if row is None:
-            return DeleteUploadResult(found=False, file_deleted=False)
-        conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
-    path = str(row["local_path"] or "")
-    if not path:
-        return DeleteUploadResult(found=True, file_deleted=True, local_path="")
-    resolved = Path(path).expanduser().resolve()
-    existed = resolved.exists() and resolved.is_file()
-    deleted = safe_unlink_under(path, C.UPLOAD_DIR)
-    if existed and not deleted:
-        return DeleteUploadResult(found=True, file_deleted=False, local_path=path)
-    return DeleteUploadResult(found=True, file_deleted=True, local_path=path)
-
-
-def list_generation_files() -> list[dict[str, Any]]:
-    with closing(db_connect()) as conn:
-        rows = conn.execute("SELECT result_url, remote_url, local_path FROM generations").fetchall()
-    return [dict(row) for row in rows]
-
-
-def generation_metadata_by_filename() -> dict[str, dict[str, Any]]:
-    """按生成文件名索引最近一次生成记录，供文件管理页展示来源。"""
-    with closing(db_connect()) as conn:
-        rows = conn.execute(
-            """
-            SELECT media_type, prompt, model, provider, request_model, input_mode, duration_ms,
-                   status, result_url, local_path, task_id, created_at, updated_at
-            FROM generations
-            WHERE local_path IS NOT NULL AND local_path != ''
-            ORDER BY created_at DESC
-            """
-        ).fetchall()
-    indexed: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        path = str(row["local_path"] or "")
-        filename = Path(path).name if path else ""
-        if not filename or filename in indexed:
-            continue
-        item = dict(row)
-        item["filename"] = filename
-        indexed[filename] = item
-    return indexed
-
-
-def clear_generations() -> None:
-    with closing(db_connect()) as conn:
-        conn.execute("DELETE FROM generations")
-
-
-# ── 管理后台账号 / 会话 ───────────────────────────────
-def ensure_default_admin_user() -> None:
-    """首次启动时创建默认管理员。密码只以哈希形式写入数据库。"""
-    username = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
-    with closing(db_connect()) as conn:
-        row = conn.execute("SELECT username FROM admin_users LIMIT 1").fetchone()
-        if row is not None:
-            return
-        default_password = (os.getenv("ADMIN_DEFAULT_PASSWORD") or "").strip()
-        if not default_password:
-            default_password = secrets.token_urlsafe(16)
-            log.warning(
-                "Created default admin user %s with generated initial password: %s",
-                username,
-                default_password,
-            )
-        conn.execute(
-            "INSERT INTO admin_users(username,password_hash,created_at,updated_at) VALUES(?,?,?,?)",
-            (username, hash_password(default_password), now_iso(), now_iso()),
-        )
-
-
-def verify_admin_login(username: str, password: str) -> bool:
-    with closing(db_connect()) as conn:
-        row = conn.execute("SELECT password_hash FROM admin_users WHERE username = ?", (username,)).fetchone()
-    if row is None:
-        return False
-    return verify_password(password, str(row["password_hash"]))
-
-
-def create_admin_session(username: str, ttl_seconds: int = 7 * 24 * 3600) -> tuple[str, float]:
-    token = generate_session_token()
-    expires_at = time.time() + ttl_seconds
-    with closing(db_connect()) as conn:
-        conn.execute(
-            "INSERT INTO admin_sessions(session_hash,username,expires_at,created_at) VALUES(?,?,?,?)",
-            (hash_token(token), username, expires_at, now_iso()),
-        )
-    return token, expires_at
-
-
-def get_admin_session(token: str) -> dict[str, Any] | None:
-    if not token:
-        return None
-    digest = hash_token(token)
-    with closing(db_connect()) as conn:
-        row = conn.execute("SELECT username,expires_at FROM admin_sessions WHERE session_hash = ?", (digest,)).fetchone()
-    if row is None:
-        return None
-    if float(row["expires_at"]) < time.time():
-        delete_admin_session(token)
-        return None
-    return {"username": str(row["username"]), "expires_at": float(row["expires_at"])}
-
-
-def delete_admin_session(token: str) -> None:
-    if not token:
-        return
-    with closing(db_connect()) as conn:
-        conn.execute("DELETE FROM admin_sessions WHERE session_hash = ?", (hash_token(token),))
-
-
-def purge_expired_admin_sessions() -> int:
-    with closing(db_connect()) as conn:
-        cur = conn.execute("DELETE FROM admin_sessions WHERE expires_at < ?", (time.time(),))
-    return int(cur.rowcount or 0)
-
-
-def purge_old_admin_login_attempts(max_age_seconds: int = 24 * 3600) -> int:
-    cutoff = time.time() - max_age_seconds
-    cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-    with closing(db_connect()) as conn:
-        cur = conn.execute(
-            "DELETE FROM admin_login_attempts WHERE updated_at < ? OR locked_until < ?",
-            (cutoff_iso, time.time() - max_age_seconds),
-        )
-    return int(cur.rowcount or 0)
-
-
-def cleanup_admin_security_state() -> dict[str, int]:
-    return {
-        "expired_sessions": purge_expired_admin_sessions(),
-        "old_login_attempts": purge_old_admin_login_attempts(),
-    }
-
-
-def login_attempt_key(username: str, client_ip: str) -> str:
-    normalized_user = (username or "").strip().lower() or "unknown"
-    normalized_ip = (client_ip or "unknown").strip()
-    return f"{normalized_user}@{normalized_ip}"
-
-
-def get_admin_login_lock(username: str, client_ip: str) -> float:
-    key = login_attempt_key(username, client_ip)
-    with closing(db_connect()) as conn:
-        row = conn.execute("SELECT locked_until FROM admin_login_attempts WHERE attempt_key = ?", (key,)).fetchone()
-    if row is None:
-        return 0.0
-    locked_until = float(row["locked_until"] or 0)
-    if locked_until <= time.time():
-        return 0.0
-    return locked_until
-
-
-class LoginAttemptResult(NamedTuple):
-    fail_count: int
-    locked_until: float
-
-
-def record_admin_login_failure(username: str, client_ip: str, max_failures: int = 5, lock_seconds: int = 30) -> LoginAttemptResult:
-    key = login_attempt_key(username, client_ip)
-    now_ts = time.time()
-    with closing(db_connect()) as conn:
-        row = conn.execute("SELECT fail_count, locked_until FROM admin_login_attempts WHERE attempt_key = ?", (key,)).fetchone()
-        if row is None:
-            fail_count = 1
-        else:
-            fail_count = int(row["fail_count"] or 0) + 1
-        locked_until = now_ts + lock_seconds if fail_count >= max_failures else 0.0
-        conn.execute(
-            "INSERT INTO admin_login_attempts(attempt_key,fail_count,locked_until,updated_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(attempt_key) DO UPDATE SET fail_count=excluded.fail_count, locked_until=excluded.locked_until, updated_at=excluded.updated_at",
-            (key, fail_count, locked_until, now_iso()),
-        )
-    return LoginAttemptResult(fail_count=fail_count, locked_until=locked_until)
-
-
-def clear_admin_login_failures(username: str, client_ip: str) -> None:
-    key = login_attempt_key(username, client_ip)
-    with db_transaction() as conn:
-        conn.execute("DELETE FROM admin_login_attempts WHERE attempt_key = ?", (key,))
-        cutoff_iso = datetime.fromtimestamp(time.time() - 24 * 3600, tz=timezone.utc).isoformat()
-        conn.execute("DELETE FROM admin_login_attempts WHERE updated_at < ?", (cutoff_iso,))
-
-
-def change_admin_password(username: str, current_password: str, new_password: str) -> bool:
-    if len(new_password) < 8:
-        raise HTTPException(status_code=400, detail="新密码至少 8 位")
-    if not verify_admin_login(username, current_password):
-        return False
-    with db_transaction(immediate=True) as conn:
-        conn.execute(
-            "UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?",
-            (hash_password(new_password), now_iso(), username),
-        )
-        conn.execute("DELETE FROM admin_sessions WHERE username = ?", (username,))
-    return True
-
-
-def delete_generation_records_for_file(local_path: str, result_url: str = "") -> int:
-    with closing(db_connect()) as conn:
-        cur = conn.execute(
-            "DELETE FROM generations WHERE local_path = ? OR result_url = ?",
-            (local_path, result_url),
-        )
-    return int(cur.rowcount or 0)
-
-
-def clear_generations_and_collect_files() -> list[str]:
-    """单事务收集 local_path 并清空历史，避免计数受并发读写影响。"""
-    with db_transaction(immediate=True) as conn:
-        rows = conn.execute("SELECT local_path FROM generations WHERE local_path IS NOT NULL AND local_path != ''").fetchall()
-        paths = [str(row["local_path"]) for row in rows]
-        conn.execute("DELETE FROM generations")
-        return paths
-
-
-def known_generated_local_paths() -> set[str]:
-    with closing(db_connect()) as conn:
-        rows = conn.execute("SELECT local_path FROM generations WHERE local_path IS NOT NULL AND local_path != ''").fetchall()
-    return {str(row["local_path"]) for row in rows}
+__all__ = [
+    "BUILTIN_PROVIDER_CONFIG_KEYS",
+    "DeleteUploadResult",
+    "LoginAttemptResult",
+    "PROVIDER_ID_RE",
+    "TABLE_SELECT_SQL",
+    "_JOB_COLUMNS",
+    "apply_saved_config_to_runtime",
+    "builtin_provider_enabled",
+    "change_admin_password",
+    "cleanup_admin_security_state",
+    "clear_admin_login_failures",
+    "clear_generations",
+    "clear_generations_and_collect_files",
+    "config_snapshot",
+    "create_admin_session",
+    "create_gateway_api_key",
+    "create_job",
+    "db_connect",
+    "db_transaction",
+    "delete_admin_session",
+    "delete_asset",
+    "delete_custom_provider",
+    "delete_generation_records_for_file",
+    "delete_upload",
+    "ensure_columns",
+    "ensure_default_admin_user",
+    "fail_job",
+    "find_recent_job_by_request_hash",
+    "first_result_url",
+    "generation_metadata_by_filename",
+    "get_admin_login_lock",
+    "get_admin_session",
+    "get_asset",
+    "get_config",
+    "get_custom_provider",
+    "get_gateway_api_key",
+    "get_job",
+    "get_job_by_external_task_id",
+    "has_gateway_api_key_records",
+    "init_db",
+    "is_relative_to_path",
+    "known_generated_local_paths",
+    "list_assets",
+    "list_custom_providers",
+    "list_gateway_api_keys",
+    "list_generation_files",
+    "list_jobs",
+    "list_rows",
+    "load_saved_settings",
+    "login_attempt_key",
+    "mask_secret",
+    "now_iso",
+    "purge_expired_admin_sessions",
+    "purge_old_admin_login_attempts",
+    "record_admin_login_failure",
+    "record_generation",
+    "revoke_gateway_api_key",
+    "safe_json",
+    "safe_unlink_under",
+    "save_asset",
+    "save_assistant_plan",
+    "save_upload",
+    "set_builtin_provider_enabled",
+    "set_config",
+    "set_config_many",
+    "update_custom_provider_enabled",
+    "update_custom_provider_sort",
+    "update_custom_provider_test",
+    "update_gateway_api_key",
+    "update_gateway_api_key_last_used",
+    "update_job_status",
+    "upsert_custom_provider",
+    "upsert_video_task",
+    "validate_provider_id",
+    "verify_admin_login",
+    "verify_gateway_api_key",
+]

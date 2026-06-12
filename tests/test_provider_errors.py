@@ -8,11 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from angemedia_gateway.providers.base import (  # noqa: E402
+from angemedia_gateway.providers.errors import (  # noqa: E402
     BackendUnavailable,
     ProviderAuthError,
     ProviderError,
+    ProviderProtocolError,
     ProviderRateLimited,
+    ProviderTaskFailed,
     ProviderTimeout,
     ProviderUnavailable,
     ProviderValidationError,
@@ -104,6 +106,17 @@ class ProviderErrorCompatTest(unittest.TestCase):
         self.assertFalse(exc.retryable)
         self.assertEqual(exc.error_category, "validation")
         self.assertEqual(exc.status_code, 400)
+
+    def test_provider_protocol_error_fields(self) -> None:
+        exc = ProviderProtocolError("invalid json", status_code=200)
+        self.assertFalse(exc.retryable)
+        self.assertEqual(exc.error_category, "protocol")
+        self.assertEqual(exc.status_code, 200)
+
+    def test_provider_task_failed_fields(self) -> None:
+        exc = ProviderTaskFailed("task failed")
+        self.assertFalse(exc.retryable)
+        self.assertEqual(exc.error_category, "task_failed")
 
     def test_provider_unavailable_with_status_code(self) -> None:
         exc = ProviderUnavailable("server error", status_code=503, retryable=True)

@@ -13,17 +13,15 @@ from fastapi import Cookie, Header, HTTPException, Request, UploadFile
 from . import config as C
 from .adapters.agnes_video import AgnesVideoProvider
 from .media import cleanup_controlled_download_tmp_dir, verify_download_tmp_os_replace_ready
-from .providers.image import build_providers
-from .state import (
-    apply_saved_config_to_runtime,
-    cleanup_admin_security_state,
-    ensure_default_admin_user,
-    get_admin_session,
+from .providers.image.registry import build_providers
+from .db.schema import init_db
+from .repositories.admin_auth import cleanup_admin_security_state, ensure_default_admin_user, get_admin_session
+from .repositories.gateway_keys import (
     has_gateway_api_key_records,
-    init_db,
     update_gateway_api_key_last_used,
     verify_gateway_api_key,
 )
+from .repositories.settings import apply_saved_config_to_runtime
 
 log = logging.getLogger("angemedia-gateway")
 logging.basicConfig(

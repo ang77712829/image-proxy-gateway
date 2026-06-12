@@ -11,7 +11,7 @@ from .. import config as C
 from ..assistant import assistant_allow_agnes, assistant_allow_paid, assistant_enabled
 from ..runtime import refresh_runtime
 from ..security import ensure_public_http_url, generate_gateway_key, redact_secret_text
-from ..state import (
+from ..repositories.settings import (
     BUILTIN_PROVIDER_CONFIG_KEYS,
     builtin_provider_enabled,
     config_snapshot,
@@ -202,15 +202,16 @@ async def fetch_assistant_model_ids(base_url: str, api_key: str, timeout: float 
 class AdminService:
     def builtin_configured(self, provider_id: str) -> bool:
         if provider_id == "siliconflow":
-            return bool(C.SILICONFLOW_API_KEY)
+            return bool(get_config("SILICONFLOW_API_KEY", C.SILICONFLOW_API_KEY))
         if provider_id == "modelscope":
-            return bool(C.MODELSCOPE_API_KEY)
+            return bool(get_config("MODELSCOPE_API_KEY", C.MODELSCOPE_API_KEY))
         if provider_id == "pollinations":
             return True
         if provider_id == "openai_image":
-            return bool(C.OPENAI_IMAGE_API_KEY)
+            fallback = os.getenv("OPENAI_API_KEY", C.OPENAI_IMAGE_API_KEY)
+            return bool(get_config("OPENAI_IMAGE_API_KEY", fallback))
         if provider_id in {"agnes_image", "agnes_video"}:
-            return bool(C.AGNES_API_KEY)
+            return bool(get_config("AGNES_API_KEY", C.AGNES_API_KEY))
         if provider_id == "mock":
             return True
         return False
