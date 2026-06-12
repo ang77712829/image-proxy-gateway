@@ -115,12 +115,12 @@ class SiliconFlowProvider:
         if resp.status_code == 429:
             raise RateLimited("SiliconFlow rate limited")
         if resp.status_code != 200:
-            raise BackendUnavailable(f"SiliconFlow {resp.status_code}: {resp.text[:300]}")
+            raise BackendUnavailable(f"SiliconFlow 上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
 
         data = resp.json()
         images = data.get("images") or []
         if not images or not images[0].get("url"):
-            raise BackendUnavailable(f"SiliconFlow returned no image URL: {data}")
+            raise BackendUnavailable("SiliconFlow 未返回图片地址")
         return openai_image_response(url=images[0]["url"])
 
     def health(self) -> str:
@@ -153,16 +153,16 @@ class ModelScopeProvider:
                 await quota.mark_exhausted()
                 raise RateLimited("ModelScope remote quota is exhausted")
             if submit.status_code != 200:
-                raise BackendUnavailable(f"ModelScope submit {submit.status_code}: {submit.text[:300]}")
+                raise BackendUnavailable(f"ModelScope 提交任务失败：HTTP {submit.status_code}", status_code=submit.status_code)
 
             try:
                 data = submit.json()
             except Exception as exc:
-                raise BackendUnavailable(f"ModelScope returned non-JSON submit response: {submit.text[:300]}") from exc
+                raise BackendUnavailable("ModelScope 返回了非 JSON 响应") from exc
 
             task_id = data.get("task_id")
             if not task_id:
-                raise BackendUnavailable(f"ModelScope submit response has no task_id: {data}")
+                raise BackendUnavailable("ModelScope 提交响应缺少 task_id")
 
             await quota.consume_one()
             log.info("ModelScope task submitted: model=%s task_id=%s remaining=%s", target.model, task_id, quota.remaining)
@@ -182,7 +182,7 @@ class ModelScopeProvider:
                     await quota.mark_exhausted()
                     raise RateLimited("ModelScope task polling rate limited")
                 if poll.status_code != 200:
-                    raise BackendUnavailable(f"ModelScope poll {poll.status_code}: {poll.text[:300]}")
+                    raise BackendUnavailable(f"ModelScope 轮询失败：HTTP {poll.status_code}", status_code=poll.status_code)
 
                 task = poll.json()
                 status = task.get("task_status", "")
@@ -190,9 +190,9 @@ class ModelScopeProvider:
                     images = task.get("output_images") or []
                     if images:
                         return openai_image_response(url=images[0])
-                    raise BackendUnavailable(f"ModelScope task succeeded without output_images: {task}")
+                    raise BackendUnavailable("ModelScope 任务成功但未返回图片")
                 if status == "FAILED":
-                    raise BackendUnavailable(f"ModelScope task failed: {task}")
+                    raise BackendUnavailable("ModelScope 任务失败")
 
         raise BackendUnavailable(f"ModelScope polling timed out after {C.MAX_POLL_TIME}s")
 
@@ -232,7 +232,7 @@ class PollinationsProvider:
             if resp.status_code == 429:
                 raise RateLimited("Pollinations rate limited")
             if resp.status_code != 200:
-                raise BackendUnavailable(f"Pollinations {resp.status_code}: {resp.text[:300]}")
+                raise BackendUnavailable(f"Pollinations 上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
             return resp.json()
 
         encoded = urllib.parse.quote(req.prompt)
@@ -298,12 +298,12 @@ class OpenAICompatibleImageProvider:
         if resp.status_code == 429:
             raise RateLimited("OpenAI-compatible image provider rate limited")
         if resp.status_code != 200:
-            raise BackendUnavailable(f"OpenAI-compatible image provider {resp.status_code}: {resp.text[:300]}")
+            raise BackendUnavailable(f"OpenAI-compatible image provider 上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
 
         data = resp.json()
         item = (data.get("data") or [{}])[0]
         if not item.get("url") and not item.get("b64_json"):
-            raise BackendUnavailable(f"OpenAI-compatible image provider returned no image data: {data}")
+            raise BackendUnavailable("OpenAI-compatible image provider 未返回图片数据")
         return data
 
     def health(self) -> str:
@@ -385,7 +385,7 @@ class AgnesImageProvider:
         if resp.status_code == 429:
             raise RateLimited("Agnes AI image provider rate limited")
         if resp.status_code not in (200, 201):
-            raise BackendUnavailable(f"Agnes AI image provider {resp.status_code}: {resp.text[:300]}")
+            raise BackendUnavailable(f"Agnes AI image provider 上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
 
         return normalize_image_response(resp.json())
 
@@ -421,7 +421,7 @@ def normalize_image_response(data: dict[str, Any]) -> dict[str, Any]:
                         return openai_image_response(b64_json=first[key])
                     return openai_image_response(url=first[key])
 
-    raise BackendUnavailable(f"图片接口没有返回可识别的图片地址：{data}")
+    raise BackendUnavailable("图片接口未返回可识别的图片地址")
 
 
 def build_providers() -> dict[str, ProviderBase]:

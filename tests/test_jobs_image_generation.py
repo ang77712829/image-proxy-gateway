@@ -1065,3 +1065,170 @@ class WErr2ACustomProviderDiagRedTest(_ImageJobTestBase):
         self.assertNotIn("request_hash", detail_str)
         self.assertNotIn("input_json", detail_str)
         self.assertNotIn("output_json", detail_str)
+
+
+class ProviderSafeMessageTest(unittest.TestCase):
+    """Provider error messages 不泄露上游 raw body / raw dict。"""
+
+    def _mock_httpx(self, fake_resp):
+        """创建一个 mock httpx.AsyncClient，返回 fake_resp。"""
+        from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=fake_resp)
+        mock_client.get = AsyncMock(return_value=fake_resp)
+        return patch("angemedia_gateway.providers.image.httpx.AsyncClient", return_value=mock_client)
+
+    def _mock_httpx_custom(self, fake_resp):
+        """创建一个 mock httpx.AsyncClient for custom.py。"""
+        from unittest.mock import AsyncMock
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=fake_resp)
+        return patch("angemedia_gateway.providers.custom.httpx.AsyncClient", return_value=mock_client)
+
+    def test_siliconflow_http_error_no_raw_body(self) -> None:
+        from angemedia_gateway.providers.image import SiliconFlowProvider
+        from angemedia_gateway.providers.base import BackendUnavailable, RouteTarget
+        from angemedia_gateway.schemas import ImageRequest
+        import asyncio
+
+        marker = "SILICONFLOW_RAW_BODY_SHOULD_NOT_LEAK"
+        fake_resp = type("Resp", (), {"status_code": 500, "text": marker})()
+
+        async def run():
+            with self._mock_httpx(fake_resp):
+                req = ImageRequest(prompt="test", model="kolors", size="1024x1024")
+                target = RouteTarget(provider="siliconflow", model="Kwai-Kolors/Kolors")
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await SiliconFlowProvider().generate(req, target)
+                self.assertNotIn(marker, str(ctx.exception))
+                self.assertIn("HTTP 500", str(ctx.exception))
+                self.assertEqual(ctx.exception.status_code, 500)
+
+        with (
+            patch("angemedia_gateway.providers.image.C.SILICONFLOW_API_KEY", "sk-test"),
+            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
+            patch("angemedia_gateway.providers.image.C.KOLORS_SIZES", {"1024x1024"}),
+        ):
+            asyncio.run(run())
+
+    def test_openai_compatible_http_error_no_raw_body(self) -> None:
+        from angemedia_gateway.providers.image import OpenAICompatibleImageProvider
+        from angemedia_gateway.providers.base import BackendUnavailable, RouteTarget
+        from angemedia_gateway.schemas import ImageRequest
+        import asyncio
+
+        marker = "OPENAI_IMAGE_RAW_BODY_SHOULD_NOT_LEAK"
+        fake_resp = type("Resp", (), {"status_code": 500, "text": marker})()
+
+        async def run():
+            with self._mock_httpx(fake_resp):
+                req = ImageRequest(prompt="test", model="gpt-image-2", size="1024x1024")
+                target = RouteTarget(provider="openai_image", model="gpt-image-2")
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await OpenAICompatibleImageProvider().generate(req, target)
+                self.assertNotIn(marker, str(ctx.exception))
+                self.assertIn("HTTP 500", str(ctx.exception))
+                self.assertEqual(ctx.exception.status_code, 500)
+
+        with (
+            patch("angemedia_gateway.providers.image.C.OPENAI_IMAGE_API_KEY", "sk-test"),
+            patch("angemedia_gateway.providers.image.C.OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1"),
+            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
+        ):
+            asyncio.run(run())
+
+    def test_custom_provider_http_error_no_raw_body(self) -> None:
+        from angemedia_gateway.providers.custom import generate_custom_openai_image
+        from angemedia_gateway.providers.base import BackendUnavailable
+        from angemedia_gateway.schemas import ImageRequest
+        import asyncio
+
+        marker = "CUSTOM_RAW_BODY_SHOULD_NOT_LEAK"
+        fake_resp = type("Resp", (), {"status_code": 500, "text": marker})()
+
+        async def run():
+            with self._mock_httpx_custom(fake_resp):
+                req = ImageRequest(prompt="test", model="test-model", size="1024x1024")
+                provider = {"enabled": True, "base_url": "https://example.com/v1", "api_key": "sk-test", "default_model": "test-model"}
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await generate_custom_openai_image(req, provider)
+                self.assertNotIn(marker, str(ctx.exception))
+                self.assertIn("HTTP 500", str(ctx.exception))
+                self.assertEqual(ctx.exception.status_code, 500)
+
+        asyncio.run(run())
+
+    def test_siliconflow_no_image_url_no_raw_dict(self) -> None:
+        from angemedia_gateway.providers.image import SiliconFlowProvider
+        from angemedia_gateway.providers.base import BackendUnavailable, RouteTarget
+        from angemedia_gateway.schemas import ImageRequest
+        import asyncio
+
+        marker = "RAW_DICT_SHOULD_NOT_LEAK"
+        fake_data = {"error": marker, "images": []}
+        fake_resp = type("Resp", (), {"status_code": 200, "text": "{}", "json": lambda s: fake_data})()
+
+        async def run():
+            with self._mock_httpx(fake_resp):
+                req = ImageRequest(prompt="test", model="kolors", size="1024x1024")
+                target = RouteTarget(provider="siliconflow", model="Kwai-Kolors/Kolors")
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await SiliconFlowProvider().generate(req, target)
+                self.assertNotIn(marker, str(ctx.exception))
+
+        with (
+            patch("angemedia_gateway.providers.image.C.SILICONFLOW_API_KEY", "sk-test"),
+            patch("angemedia_gateway.providers.image.C.HTTP_TIMEOUT", 10),
+            patch("angemedia_gateway.providers.image.C.KOLORS_SIZES", {"1024x1024"}),
+        ):
+            asyncio.run(run())
+
+    def test_custom_provider_no_image_data_no_raw_dict(self) -> None:
+        from angemedia_gateway.providers.custom import generate_custom_openai_image
+        from angemedia_gateway.providers.base import BackendUnavailable
+        from angemedia_gateway.schemas import ImageRequest
+        import asyncio
+
+        marker = "RAW_DICT_SHOULD_NOT_LEAK"
+        fake_data = {"error": marker, "data": [{}]}
+        fake_resp = type("Resp", (), {"status_code": 200, "text": "{}", "json": lambda s: fake_data})()
+
+        async def run():
+            with self._mock_httpx_custom(fake_resp):
+                req = ImageRequest(prompt="test", model="test-model", size="1024x1024")
+                provider = {"enabled": True, "base_url": "https://example.com/v1", "api_key": "sk-test", "default_model": "test-model"}
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await generate_custom_openai_image(req, provider)
+                self.assertNotIn(marker, str(ctx.exception))
+
+        asyncio.run(run())
+
+    def test_provider_error_messages_do_not_reference_raw_response_text(self) -> None:
+        """静态回归：生产 provider 文件中不得出现 raw body 拼接模式。"""
+        dangerous_patterns = [
+            "resp.text",
+            "submit.text",
+            "poll.text",
+            "response.text",
+            ".text[:300]",
+            ".text[:200]",
+            ": {data}",
+            ": {task}",
+            "redact_secret_text(resp.text",
+        ]
+        provider_files = [
+            ROOT / "scripts" / "angemedia_gateway" / "providers" / "image.py",
+            ROOT / "scripts" / "angemedia_gateway" / "providers" / "custom.py",
+        ]
+        for file_path in provider_files:
+            source = file_path.read_text(encoding="utf-8")
+            for pattern in dangerous_patterns:
+                if pattern in source:
+                    self.fail(
+                        f"Dangerous pattern {pattern!r} found in {file_path.name}. "
+                        "Provider error messages must not include raw upstream body."
+                    )

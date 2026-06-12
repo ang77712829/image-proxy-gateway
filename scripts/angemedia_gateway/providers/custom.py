@@ -7,7 +7,7 @@ import httpx
 
 from .. import config as C
 from ..schemas import ImageRequest
-from ..security import ensure_public_http_url, redact_secret_text
+from ..security import ensure_public_http_url
 from .base import BackendUnavailable, RateLimited
 
 
@@ -59,10 +59,10 @@ async def generate_custom_openai_image(req: ImageRequest, provider: dict[str, An
     if resp.status_code == 429:
         raise RateLimited("自定义渠道限流")
     if resp.status_code != 200:
-        raise BackendUnavailable(f"自定义渠道 {resp.status_code}: {redact_secret_text(resp.text[:300])}")
+        raise BackendUnavailable(f"自定义渠道上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
 
     data = resp.json()
     item = (data.get("data") or [{}])[0]
     if not item.get("url") and not item.get("b64_json"):
-        raise BackendUnavailable(f"自定义渠道没有返回图片数据：{data}")
+        raise BackendUnavailable("自定义渠道没有返回图片数据")
     return data
