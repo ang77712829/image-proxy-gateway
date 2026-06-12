@@ -857,6 +857,80 @@ class AdminApiWriteTest(unittest.TestCase):
         self.assertEqual(sorted_response.status_code, 200, sorted_response.text)
         self.assert_provider_safe_summary(sorted_response.json()["data"], api_key_configured=True)
 
+    # ── Provider Delete Safety Coverage ────────────────────
+
+    def test_delete_provider_with_gateway_api_key_returns_403(self) -> None:
+        """API 模式 API Key 不能调用 DELETE /v1/admin/providers，必须 403。"""
+        key_resp = self.client.post("/v1/admin/gateway-keys", json={"name": "delete-test-key"})
+        self.assertEqual(key_resp.status_code, 200, key_resp.text)
+        api_key = key_resp.json()["data"]["key"]
+
+        provider_id = self.unique_provider_id("gw-delete")
+        self.create_custom_provider(provider_id)
+
+        # Use a separate client WITHOUT admin session to test pure API key auth
+        api_client = TestClient(app)
+        response = api_client.delete(
+            f"/v1/admin/providers/{provider_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertIn("网关访问密钥不能访问管理后台", response.text)
+
+        # provider must still exist after forbidden attempt
+        self.provider_list_row(provider_id)
+
+    def test_delete_builtin_provider_siliconflow_returns_404(self) -> None:
+        """删除 builtin provider siliconflow 必须返回 404，不能删除内置渠道。"""
+        response = self.client.delete("/v1/admin/providers/siliconflow")
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json()["detail"], "自定义渠道不存在")
+
+        # builtin provider must still be listed
+        status = self.client.get("/v1/admin/provider-status")
+        self.assertEqual(status.status_code, 200, status.text)
+        builtin_ids = [row["id"] for row in status.json()["built_in"]]
+        self.assertIn("siliconflow", builtin_ids)
+
+    def test_custom_provider_create_delete_second_delete_returns_404(self) -> None:
+        """create → delete 成功 → second delete 必须返回 404。"""
+        provider_id = self.unique_provider_id("dbl-del")
+        self.created_provider_ids.append(provider_id)
+        self.create_custom_provider(provider_id)
+
+        first = self.client.delete(f"/v1/admin/providers/{provider_id}")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertTrue(first.json()["ok"])
+        self.created_provider_ids.remove(provider_id)
+
+        second = self.client.delete(f"/v1/admin/providers/{provider_id}")
+        self.assertEqual(second.status_code, 404, second.text)
+        self.assertEqual(second.json()["detail"], "自定义渠道不存在")
+
+    def test_delete_provider_response_is_safe_minimal_dict(self) -> None:
+        """delete 响应必须严格只含 {"ok": true}，不泄露任何 secret 或 config。"""
+        provider_id = self.unique_provider_id("safe-del")
+        self.created_provider_ids.append(provider_id)
+        self.create_custom_provider(provider_id, default_model="del-model")
+
+        response = self.client.delete(f"/v1/admin/providers/{provider_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(set(body.keys()), {"ok"})
+        self.assertTrue(body["ok"])
+        response_text = response.text
+        for forbidden in ("api_key", "key_hash", "secret", "token", "base_url", "sk-"):
+            self.assertNotIn(forbidden, response_text, f"delete response must not contain '{forbidden}'")
+        self.created_provider_ids.remove(provider_id)
+
+    def test_delete_provider_returns_400_for_invalid_id_format(self) -> None:
+        """provider_id 含非法字符时必须返回 400，不能进入 SQL。"""
+        for bad_id in ["a.b", "a~b", "a*b", "a+b"]:
+            with self.subTest(bad_id=bad_id):
+                response = self.client.delete(f"/v1/admin/providers/{bad_id}")
+                self.assertEqual(response.status_code, 400, f"bad_id={bad_id!r}: {response.text}")
+                self.assertIn("渠道 ID", response.text)
+
 
 class DefaultAdminPasswordPolicyTest(unittest.TestCase):
     def test_admin_default_password_env_remains_compatible(self) -> None:
