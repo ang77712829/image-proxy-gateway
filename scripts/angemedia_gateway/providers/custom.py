@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-
-from .. import config as C
 from ..schemas import ImageRequest
 from ..security import ensure_public_http_url
-from .base import BackendUnavailable, RateLimited
+from .base import BackendUnavailable
+from .http import provider_client, request_with_provider_errors, safe_json_response
+from .parsers import require_mapping
 
 
 async def generate_custom_openai_image(req: ImageRequest, provider: dict[str, Any]) -> dict[str, Any]:
@@ -51,18 +50,24 @@ async def generate_custom_openai_image(req: ImageRequest, provider: dict[str, An
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    async with httpx.AsyncClient(timeout=C.HTTP_TIMEOUT) as client:
-        resp = await client.post(f"{base_url}/images/generations", headers=headers, json=payload)
+    async with provider_client() as client:
+        resp = await request_with_provider_errors(
+            client,
+            "POST",
+            f"{base_url}/images/generations",
+            provider="custom image provider",
+            operation="generate",
+            headers=headers,
+            json=payload,
+        )
 
-    if resp.status_code == 401:
-        raise BackendUnavailable("自定义渠道鉴权失败")
-    if resp.status_code == 429:
-        raise RateLimited("自定义渠道限流")
-    if resp.status_code != 200:
-        raise BackendUnavailable(f"自定义渠道上游返回 HTTP {resp.status_code}", status_code=resp.status_code)
-
-    data = resp.json()
-    item = (data.get("data") or [{}])[0]
-    if not item.get("url") and not item.get("b64_json"):
+    data = require_mapping(
+        safe_json_response(resp, provider="custom image provider", operation="generate"),
+        provider="custom image provider",
+        operation="generate",
+    )
+    item_list = data.get("data") or [{}]
+    item = item_list[0] if isinstance(item_list, list) and item_list else {}
+    if not isinstance(item, dict) or (not item.get("url") and not item.get("b64_json")):
         raise BackendUnavailable("自定义渠道没有返回图片数据")
     return data

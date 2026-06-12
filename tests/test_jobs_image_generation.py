@@ -1087,7 +1087,7 @@ class ProviderSafeMessageTest(unittest.TestCase):
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client.post = AsyncMock(return_value=fake_resp)
-        return patch("angemedia_gateway.providers.custom.httpx.AsyncClient", return_value=mock_client)
+        return patch("httpx.AsyncClient", return_value=mock_client)
 
     def test_siliconflow_http_error_no_raw_body(self) -> None:
         from angemedia_gateway.providers.image import SiliconFlowProvider

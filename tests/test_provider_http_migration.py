@@ -17,8 +17,14 @@ from angemedia_gateway.providers.errors import (  # noqa: E402
     ProviderTimeout,
     RateLimited,
 )
+from angemedia_gateway.providers.custom import generate_custom_openai_image  # noqa: E402
 from angemedia_gateway.providers.http import provider_client  # noqa: E402
-from angemedia_gateway.providers.image import AgnesImageProvider, ModelScopeProvider, SiliconFlowProvider  # noqa: E402
+from angemedia_gateway.providers.image import (  # noqa: E402
+    AgnesImageProvider,
+    ModelScopeProvider,
+    OpenAICompatibleImageProvider,
+    SiliconFlowProvider,
+)
 from angemedia_gateway.providers.image import modelscope as modelscope_module  # noqa: E402
 from angemedia_gateway.schemas import ImageRequest  # noqa: E402
 
@@ -81,6 +87,180 @@ class ProviderHttpFoundationMigrationTest(unittest.TestCase):
 
         self.assertFalse(async_client.call_args.kwargs["trust_env"])
         self.assertIsInstance(async_client.call_args.kwargs["timeout"], httpx.Timeout)
+
+    def test_openai_compatible_success_shape_and_payload_are_unchanged(self) -> None:
+        result = {"data": [{"url": "https://example.test/out.png"}]}
+        fake = FakeAsyncClient(post=_response(200, json_data=result))
+
+        async def run() -> dict:
+            with self._openai_patches(fake):
+                req = ImageRequest(prompt="test", model="gpt-image-2", size="1024x1024", quality="high", user="u1")
+                return await OpenAICompatibleImageProvider().generate(req, self._openai_target())
+
+        import asyncio
+
+        self.assertEqual(asyncio.run(run()), result)
+        payload = fake.post_calls[0][1]["json"]
+        headers = fake.post_calls[0][1]["headers"]
+        self.assertEqual(
+            payload,
+            {
+                "model": "gpt-image-2",
+                "prompt": "test",
+                "n": 1,
+                "size": "1024x1024",
+                "response_format": "url",
+                "quality": "high",
+                "user": "u1",
+            },
+        )
+        self.assertEqual(headers["Authorization"], "Bearer sk-openai-config-secret")
+
+    def test_openai_compatible_errors_are_safe(self) -> None:
+        async def http_500() -> None:
+            fake = FakeAsyncClient(post=_response(500, text="SECRET_HTML sk-secret Authorization: Bearer secret"))
+            with self._openai_patches(fake):
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await OpenAICompatibleImageProvider().generate(self._image_request(), self._openai_target())
+            self.assertEqual(ctx.exception.status_code, 500)
+            self.assert_safe_error(ctx.exception)
+
+        async def invalid_json() -> None:
+            fake = FakeAsyncClient(post=_response(200, text="not json sk-secret token password"))
+            with self._openai_patches(fake):
+                with self.assertRaises(ProviderProtocolError) as ctx:
+                    await OpenAICompatibleImageProvider().generate(self._image_request(), self._openai_target())
+            self.assert_safe_error(ctx.exception)
+
+        async def rate_limit() -> None:
+            fake = FakeAsyncClient(post=_response(429, text="sk-secret token password"))
+            with self._openai_patches(fake):
+                with self.assertRaises(RateLimited) as ctx:
+                    await OpenAICompatibleImageProvider().generate(self._image_request(), self._openai_target())
+            self.assertEqual(ctx.exception.status_code, 429)
+            self.assert_safe_error(ctx.exception)
+
+        import asyncio
+
+        asyncio.run(http_500())
+        asyncio.run(invalid_json())
+        asyncio.run(rate_limit())
+
+    def test_openai_compatible_timeout_and_network_errors_are_safe(self) -> None:
+        async def timeout_case() -> None:
+            fake = FakeAsyncClient(post=httpx.ReadTimeout("sk-secret token password"))
+            with self._openai_patches(fake):
+                with self.assertRaises(ProviderTimeout) as ctx:
+                    await OpenAICompatibleImageProvider().generate(self._image_request(), self._openai_target())
+            self.assertEqual(ctx.exception.error_category, "timeout")
+            self.assert_safe_error(ctx.exception)
+
+        async def network_case() -> None:
+            fake = FakeAsyncClient(post=httpx.ConnectError("sk-secret token password"))
+            with self._openai_patches(fake):
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await OpenAICompatibleImageProvider().generate(self._image_request(), self._openai_target())
+            self.assertEqual(ctx.exception.error_category, "network")
+            self.assert_safe_error(ctx.exception)
+
+        import asyncio
+
+        asyncio.run(timeout_case())
+        asyncio.run(network_case())
+
+    def test_custom_provider_success_shape_and_payload_are_unchanged(self) -> None:
+        result = {"data": [{"b64_json": "abc"}]}
+        fake = FakeAsyncClient(post=_response(200, json_data=result))
+
+        async def run() -> dict:
+            provider = self._custom_provider()
+            with patch("httpx.AsyncClient", return_value=fake):
+                req = ImageRequest(
+                    prompt="test",
+                    model="ignored",
+                    size="1024x1024",
+                    response_format="b64_json",
+                    quality="high",
+                    user="u1",
+                    negative_prompt="no blur",
+                    seed=123,
+                )
+                return await generate_custom_openai_image(req, provider)
+
+        import asyncio
+
+        self.assertEqual(asyncio.run(run()), result)
+        payload = fake.post_calls[0][1]["json"]
+        headers = fake.post_calls[0][1]["headers"]
+        self.assertEqual(
+            payload,
+            {
+                "model": "custom-model",
+                "prompt": "test",
+                "n": 1,
+                "size": "1024x1024",
+                "response_format": "b64_json",
+                "quality": "high",
+                "user": "u1",
+                "negative_prompt": "no blur",
+                "seed": 123,
+            },
+        )
+        self.assertEqual(headers["Authorization"], "Bearer sk-custom-provider-secret")
+
+    def test_custom_provider_errors_are_safe(self) -> None:
+        async def http_500() -> None:
+            fake = FakeAsyncClient(post=_response(500, text="SECRET_HTML sk-custom-provider-secret Authorization: Bearer secret"))
+            with patch("httpx.AsyncClient", return_value=fake):
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await generate_custom_openai_image(self._image_request(), self._custom_provider())
+            self.assertEqual(ctx.exception.status_code, 500)
+            self.assert_safe_error(ctx.exception)
+            self.assertNotIn("sk-custom-provider-secret", str(ctx.exception))
+
+        async def invalid_json() -> None:
+            fake = FakeAsyncClient(post=_response(200, text="not json sk-custom-provider-secret token password"))
+            with patch("httpx.AsyncClient", return_value=fake):
+                with self.assertRaises(ProviderProtocolError) as ctx:
+                    await generate_custom_openai_image(self._image_request(), self._custom_provider())
+            self.assert_safe_error(ctx.exception)
+            self.assertNotIn("sk-custom-provider-secret", str(ctx.exception))
+
+        async def rate_limit() -> None:
+            fake = FakeAsyncClient(post=_response(429, text="sk-custom-provider-secret token password"))
+            with patch("httpx.AsyncClient", return_value=fake):
+                with self.assertRaises(RateLimited) as ctx:
+                    await generate_custom_openai_image(self._image_request(), self._custom_provider())
+            self.assertEqual(ctx.exception.status_code, 429)
+            self.assert_safe_error(ctx.exception)
+
+        import asyncio
+
+        asyncio.run(http_500())
+        asyncio.run(invalid_json())
+        asyncio.run(rate_limit())
+
+    def test_custom_provider_timeout_and_network_errors_are_safe(self) -> None:
+        async def timeout_case() -> None:
+            fake = FakeAsyncClient(post=httpx.ReadTimeout("sk-custom-provider-secret token password"))
+            with patch("httpx.AsyncClient", return_value=fake):
+                with self.assertRaises(ProviderTimeout) as ctx:
+                    await generate_custom_openai_image(self._image_request(), self._custom_provider())
+            self.assertEqual(ctx.exception.error_category, "timeout")
+            self.assert_safe_error(ctx.exception)
+
+        async def network_case() -> None:
+            fake = FakeAsyncClient(post=httpx.ConnectError("sk-custom-provider-secret token password"))
+            with patch("httpx.AsyncClient", return_value=fake):
+                with self.assertRaises(BackendUnavailable) as ctx:
+                    await generate_custom_openai_image(self._image_request(), self._custom_provider())
+            self.assertEqual(ctx.exception.error_category, "network")
+            self.assert_safe_error(ctx.exception)
+
+        import asyncio
+
+        asyncio.run(timeout_case())
+        asyncio.run(network_case())
 
     def test_siliconflow_500_body_is_not_leaked(self) -> None:
         fake = FakeAsyncClient(post=_response(500, text="SECRET_HTML sk-secret Authorization: Bearer secret"))
@@ -281,6 +461,19 @@ class ProviderHttpFoundationMigrationTest(unittest.TestCase):
         return ImageRequest(prompt="test", model="model", size="1024x1024")
 
     @staticmethod
+    def _openai_target() -> RouteTarget:
+        return RouteTarget(provider="openai_image", model="gpt-image-2")
+
+    @staticmethod
+    def _custom_provider() -> dict[str, object]:
+        return {
+            "enabled": True,
+            "base_url": "https://example.com/v1",
+            "api_key": "sk-custom-provider-secret",
+            "default_model": "custom-model",
+        }
+
+    @staticmethod
     def _modelscope_target() -> RouteTarget:
         return RouteTarget(provider="modelscope", model="modelscope-model")
 
@@ -304,6 +497,13 @@ class ProviderHttpFoundationMigrationTest(unittest.TestCase):
         stack.enter_context(patch("httpx.AsyncClient", return_value=fake))
         stack.enter_context(patch("angemedia_gateway.config.AGNES_API_KEY", "agnes-test"))
         stack.enter_context(patch("angemedia_gateway.config.AGNES_BASE_URL", "https://agnes.example.test"))
+        return stack
+
+    def _openai_patches(self, fake: FakeAsyncClient):
+        stack = ExitStack()
+        stack.enter_context(patch("httpx.AsyncClient", return_value=fake))
+        stack.enter_context(patch("angemedia_gateway.config.OPENAI_IMAGE_API_KEY", "sk-openai-config-secret"))
+        stack.enter_context(patch("angemedia_gateway.config.OPENAI_IMAGE_BASE_URL", "https://openai.example.test/v1"))
         return stack
 
 
