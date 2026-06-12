@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch, AsyncMock, MagicMock
 
+import httpx
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -24,6 +26,7 @@ os.environ.setdefault("SILICONFLOW_API_KEY", "sf-test-secret-value")
 from fastapi import HTTPException  # noqa: E402
 
 import angemedia_gateway.config as C  # noqa: E402
+from angemedia_gateway.adapters.agnes_video import AgnesVideoError, AgnesVideoProvider  # noqa: E402
 from angemedia_gateway.routes import media as media_routes  # noqa: E402
 from angemedia_gateway.schemas import VideoRequest  # noqa: E402
 from angemedia_gateway.services.media_service import (  # noqa: E402
@@ -458,6 +461,111 @@ class VideoRouteExceptionDetailSafetyTest(_VideoJobTestBase):
             secret,
             bearer_token,
         )
+
+
+class AgnesVideoAdapterSafeMessageTest(_VideoJobTestBase):
+    """Agnes video adapter 不把 raw body / raw dict 写进异常消息。"""
+
+    def _provider(self) -> AgnesVideoProvider:
+        return AgnesVideoProvider(
+            api_key="av-test-secret-token-123456",
+            base_url="https://agnes.example.test/v1",
+            poll_interval=0,
+        )
+
+    def test_submit_http_error_does_not_leak_raw_body(self) -> None:
+        """submit HTTP error 不泄露 upstream raw body。"""
+        marker = "AGNES_VIDEO_SUBMIT_RAW_BODY_SHOULD_NOT_LEAK"
+
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def post(self, *args, **kwargs):
+                return httpx.Response(500, text=f"raw {marker}")
+
+        with patch("angemedia_gateway.adapters.agnes_video.httpx.AsyncClient", return_value=Client()):
+            with self.assertRaises(AgnesVideoError) as caught:
+                await_compat(self._provider().submit_task(self._make_request()))
+
+        text = str(caught.exception)
+        self.assertIn("HTTP 500", text)
+        self.assertNotIn(marker, text)
+        self.assertNotIn("raw", text)
+
+    def test_poll_http_error_does_not_leak_raw_body(self) -> None:
+        """poll HTTP error 不泄露 upstream raw body。"""
+        marker = "AGNES_VIDEO_POLL_RAW_BODY_SHOULD_NOT_LEAK"
+
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, *args, **kwargs):
+                return httpx.Response(500, text=f"raw {marker}")
+
+        with patch("angemedia_gateway.adapters.agnes_video.httpx.AsyncClient", return_value=Client()):
+            with self.assertRaises(AgnesVideoError) as caught:
+                await_compat(self._provider().poll_task("poll-task-safe-message"))
+
+        text = str(caught.exception)
+        self.assertIn("HTTP 500", text)
+        self.assertNotIn(marker, text)
+        self.assertNotIn("raw", text)
+
+    def test_missing_task_id_does_not_leak_submit_dict(self) -> None:
+        """missing task_id 不泄露 submit 原始 dict。"""
+        marker = "AGNES_VIDEO_SUBMIT_DICT_SHOULD_NOT_LEAK"
+        provider = self._provider()
+        provider.submit_task = AsyncMock(return_value={"error": marker})  # type: ignore[method-assign]
+
+        with self.assertRaises(AgnesVideoError) as caught:
+            await_compat(provider.generate_video(self._make_request(wait_for_completion=True)))
+
+        text = str(caught.exception)
+        self.assertIn("缺少 task_id", text)
+        self.assertNotIn(marker, text)
+        self.assertNotIn("'error'", text)
+        self.assertNotIn('"error"', text)
+
+    def test_failed_task_does_not_leak_result_dict(self) -> None:
+        """failed task 不泄露 poll 原始 result dict。"""
+        marker = "AGNES_VIDEO_FAILED_TASK_SHOULD_NOT_LEAK"
+        provider = self._provider()
+        provider.submit_task = AsyncMock(return_value={"task_id": "failed-task-001"})  # type: ignore[method-assign]
+        provider.poll_task = AsyncMock(return_value={"status": "failed", "error": marker})  # type: ignore[method-assign]
+
+        with self.assertRaises(AgnesVideoError) as caught:
+            await_compat(provider.generate_video(self._make_request(wait_for_completion=True)))
+
+        text = str(caught.exception)
+        self.assertIn("任务失败", text)
+        self.assertIn("failed", text)
+        self.assertNotIn(marker, text)
+        self.assertNotIn("'error'", text)
+        self.assertNotIn('"error"', text)
+
+    def test_agnes_video_errors_do_not_reference_raw_response_text(self) -> None:
+        """静态防线：Agnes video 生产代码不得引用 raw response body/dict。"""
+        source = (ROOT / "scripts" / "angemedia_gateway" / "adapters" / "agnes_video.py").read_text(encoding="utf-8")
+        forbidden = [
+            "resp.text",
+            "response.text",
+            ".text[:300]",
+            ".text[:200]",
+            ": {data}",
+            ": {task}",
+            ": {result}",
+            ": {submit}",
+        ]
+        for pattern in forbidden:
+            self.assertNotIn(pattern, source)
 
 
 # ── 15. GET /v1/videos/{task_id} 未修改 ───────────────

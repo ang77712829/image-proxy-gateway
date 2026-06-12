@@ -97,7 +97,7 @@ class AgnesVideoProvider:
         if resp.status_code == 429:
             raise AgnesVideoError("Agnes AI video provider rate limited")
         if resp.status_code not in (200, 201, 202):
-            raise AgnesVideoError(f"Agnes AI submit {resp.status_code}: {resp.text[:300]}")
+            raise AgnesVideoError(f"Agnes Video 提交任务失败：HTTP {resp.status_code}")
 
         return self.normalize_submit(resp.json())
 
@@ -114,7 +114,7 @@ class AgnesVideoProvider:
         if resp.status_code == 401:
             raise AgnesVideoError("Agnes AI API key is invalid or expired")
         if resp.status_code not in (200, 201, 202):
-            raise AgnesVideoError(f"Agnes AI poll {resp.status_code}: {resp.text[:300]}")
+            raise AgnesVideoError(f"Agnes Video 轮询任务失败：HTTP {resp.status_code}")
 
         return self.normalize_poll(resp.json(), task_id)
 
@@ -122,7 +122,7 @@ class AgnesVideoProvider:
         submit = await self.submit_task(req)
         task_id = submit.get("task_id") or submit.get("id")
         if not task_id:
-            raise AgnesVideoError(f"Agnes AI submit response has no task_id: {submit}")
+            raise AgnesVideoError("Agnes Video 提交响应缺少 task_id")
 
         deadline = time.time() + self.max_poll_time
         while time.time() < deadline:
@@ -132,7 +132,8 @@ class AgnesVideoProvider:
             if status in {"completed", "succeeded", "success", "done"}:
                 return result
             if status in {"failed", "error", "cancelled"}:
-                raise AgnesVideoError(f"Agnes AI video task failed: {result}")
+                safe_status = str(status or "unknown")[:64]
+                raise AgnesVideoError(f"Agnes Video 任务失败：{safe_status}")
 
         raise AgnesVideoError(f"Agnes AI video polling timed out after {self.max_poll_time}s")
 
