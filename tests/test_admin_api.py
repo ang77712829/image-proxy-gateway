@@ -303,6 +303,48 @@ class AdminApiWriteTest(unittest.TestCase):
         authorized = TestClient(app).get("/v1/models", headers={"Authorization": f"Bearer {known_key}"})
         self.assertEqual(authorized.status_code, 200, authorized.text)
 
+    def test_catalog_requires_admin_auth(self) -> None:
+        response = TestClient(app).get("/v1/admin/catalog")
+        self.assertIn(response.status_code, (401, 403), response.text)
+
+    def test_catalog_api_returns_safe_provider_and_model_capabilities(self) -> None:
+        response = self.client.get("/v1/admin/catalog")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        providers = {item["id"]: item for item in body["providers"]}
+        models = {item["id"]: item for item in body["models"]}
+
+        self.assertEqual(body["object"], "provider_catalog")
+        self.assertIn("agnes_video", providers)
+        self.assertEqual(providers["agnes_video"]["display_name"], "Agnes Video")
+        self.assertEqual(providers["agnes_video"]["media_type"], "video")
+        self.assertEqual(providers["agnes_video"]["status"], "release")
+        self.assertEqual(providers["agnes_video"]["config_enabled_key"], "BUILTIN_PROVIDER_AGNES_VIDEO_ENABLED")
+        self.assertTrue(providers["agnes_video"]["selectable"])
+
+        video_model = models["agnes-video-v2-0"]
+        self.assertEqual(video_model["provider_id"], "agnes_video")
+        self.assertEqual(video_model["media_type"], "video")
+        self.assertEqual(video_model["status"], "release")
+        self.assertTrue(video_model["selectable"])
+        self.assertTrue(video_model["capabilities"]["text_to_video"])
+        self.assertTrue(video_model["capabilities"]["image_to_video"])
+        self.assertEqual(video_model["params"]["width"], "integer")
+        self.assertEqual(video_model["ref_inputs"]["image"], "optional")
+        self.assertIn("1152x768", video_model["size_presets"])
+        self.assertIn("release_path", video_model["tags"])
+
+        pollinations = providers["pollinations"]
+        pollinations_model = models["pollinations"]
+        self.assertEqual(pollinations["status"], "experimental")
+        self.assertFalse(pollinations["enabled_default"])
+        self.assertIsNone(pollinations["default_chain_order"])
+        self.assertEqual(pollinations_model["status"], "experimental")
+        self.assertIsNone(pollinations_model["default_chain_order"])
+
+        for forbidden in ("credential_keys", "api_key", "AGNES_API_KEY", "token", "password", "secret"):
+            self.assertNotIn(forbidden, response.text)
+
     def test_provider_save_validation_errors(self) -> None:
         missing_required = self.client.post(
             "/v1/admin/providers",

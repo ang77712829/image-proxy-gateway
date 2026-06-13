@@ -8,6 +8,8 @@ from fastapi import APIRouter, Body, Cookie, Depends, HTTPException, Request, Re
 from pydantic import BaseModel, ConfigDict
 
 from ..config_metadata import metadata_response, validate_config_settings
+from ..providers.catalog.api import catalog_api_response
+from ..providers.catalog.loader import CatalogValidationError, load_provider_catalog
 from ..schemas import ConfigUpdateRequest
 from ..services.admin_service import (
     AdminService,
@@ -139,6 +141,15 @@ async def get_custom_providers() -> dict[str, Any]:
 @router.get("/v1/admin/provider-templates", dependencies=[Depends(require_admin_auth)])
 async def get_provider_templates() -> dict[str, Any]:
     return {"data": admin_service.provider_templates()}
+
+
+@router.get("/v1/admin/catalog", dependencies=[Depends(require_admin_auth)])
+async def get_provider_catalog() -> dict[str, Any]:
+    try:
+        catalog = load_provider_catalog()
+    except CatalogValidationError as exc:
+        raise HTTPException(status_code=500, detail="Provider catalog is invalid") from exc
+    return catalog_api_response(catalog)
 
 
 @router.post("/v1/admin/providers", dependencies=[Depends(require_admin_auth)])

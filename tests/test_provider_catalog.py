@@ -10,6 +10,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from angemedia_gateway.providers.catalog.api import catalog_api_response  # noqa: E402
 from angemedia_gateway.providers.catalog.loader import (  # noqa: E402
     CATALOG_DIR,
     CatalogValidationError,
@@ -48,6 +49,26 @@ class ProviderCatalogTest(unittest.TestCase):
         self.assertIn("video", provider.media_types)
         self.assertEqual(model.media_type, "video")
         self.assertIn("release_path", model.tags)
+
+    def test_catalog_api_response_projects_safe_capability_fields(self) -> None:
+        response = catalog_api_response(load_provider_catalog())
+        providers = {item["id"]: item for item in response["providers"]}
+        models = {item["id"]: item for item in response["models"]}
+
+        self.assertEqual(response["object"], "provider_catalog")
+        self.assertEqual(providers["agnes_video"]["media_type"], "video")
+        self.assertIn("video", providers["agnes_video"]["media_types"])
+        self.assertEqual(providers["pollinations"]["status"], "experimental")
+        self.assertFalse(providers["pollinations"]["enabled_default"])
+        self.assertEqual(models["agnes-video-v2-0"]["media_type"], "video")
+        self.assertIn("params", models["agnes-video-v2-0"])
+        self.assertIn("ref_inputs", models["agnes-video-v2-0"])
+        self.assertIn("size_presets", models["agnes-video-v2-0"])
+        self.assertIn("capabilities", models["agnes-video-v2-0"])
+
+        response_text = str(response).lower()
+        for forbidden in ("credential_keys", "api_key", "token", "password", "secret"):
+            self.assertNotIn(forbidden, response_text)
 
     def test_loader_uses_safe_load(self) -> None:
         import yaml
