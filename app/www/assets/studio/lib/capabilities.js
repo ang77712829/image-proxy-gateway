@@ -44,3 +44,32 @@ export function isSelectableImageProvider(item) {
 export function providerModelValue(providerId) {
   return `custom:${providerId}`;
 }
+
+export function providersFromCatalog(result) {
+  return Array.isArray(result?.providers) ? result.providers : [];
+}
+
+export function modelsFromCatalog(result) {
+  return Array.isArray(result?.models) ? result.models : [];
+}
+
+export function selectableVideoModels(result) {
+  return modelsFromCatalog(result).filter((item) => (
+    item &&
+    typeof item === 'object' &&
+    item.media_type === 'video' &&
+    item.selectable === true &&
+    item.id
+  ));
+}
+
+export function videoProvidersForModels(result, models) {
+  const providerIds = new Set(models.map((item) => item.provider_id).filter(Boolean));
+  return providersFromCatalog(result).filter((item) => providerIds.has(item.id));
+}
+
+export function parseSizePreset(value) {
+  const match = String(value || '').trim().match(/^([1-9]\d{1,3})x([1-9]\d{1,3})$/i);
+  if (!match) return null;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}

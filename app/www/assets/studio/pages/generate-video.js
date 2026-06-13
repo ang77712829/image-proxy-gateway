@@ -1,5 +1,1 @@
-import { renderUnavailable } from '../features/wip/page.js';
-
-export async function render() {
-  await renderUnavailable({ titleKey: 'wip.generateVideoTitle' });
-}
+export { render } from '../features/generate-video/page.js?v=web-studio-2c';

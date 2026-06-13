@@ -114,6 +114,49 @@
 .creator-actions {
   justify-content: flex-end;
 }
+.video-generate-grid .preview-panel .panel-body {
+  display: grid;
+  gap: 14px;
+}
+.form-subsection {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(8, 20, 40, 0.22);
+}
+html[data-theme="light"] .form-subsection {
+  background: rgba(255, 255, 255, 0.78);
+}
+.form-subsection-header {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+}
+.form-subsection-header small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+}
+.video-param-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.video-summary-frame,
+.video-model-summary {
+  display: grid;
+  gap: 12px;
+}
+.video-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .result-frame {
   min-height: clamp(260px, 46vh, 430px);
   display: grid;

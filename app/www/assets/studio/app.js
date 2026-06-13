@@ -7,7 +7,7 @@ import { initTheme } from './lib/theme.js';
 import { render as renderLogin } from './pages/login.js?v=web-studio-2c';
 import { render as renderDashboard } from './pages/dashboard.js?v=web-studio-2c';
 import { render as renderGenImage } from './pages/generate-image.js?v=web-studio-2c';
-import { render as renderGenVideo } from './pages/generate-video.js';
+import { render as renderGenVideo } from './pages/generate-video.js?v=web-studio-2c';
 import { render as renderJobsList } from './pages/jobs-list.js?v=web-studio-2c';
 import { render as renderJobsDetail } from './pages/jobs-detail.js';
 import { render as renderAssetsList } from './pages/assets-list.js?v=web-studio-2c';

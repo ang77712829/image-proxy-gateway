@@ -16,6 +16,8 @@ ASSETS_PAGE_JS = STUDIO_ROOT / "features" / "assets" / "page.js"
 JOBS_PAGE_JS = STUDIO_ROOT / "features" / "jobs" / "page.js"
 PROVIDERS_PAGE_JS = STUDIO_ROOT / "features" / "providers" / "page.js"
 KEYS_PAGE_JS = STUDIO_ROOT / "features" / "gateway-keys" / "page.js"
+GENERATE_VIDEO_PAGE_JS = STUDIO_ROOT / "features" / "generate-video" / "page.js"
+GENERATE_VIDEO_SHIM_JS = STUDIO_ROOT / "pages" / "generate-video.js"
 WIP_PAGE_JS = STUDIO_ROOT / "features" / "wip" / "page.js"
 CAPABILITIES_JS = STUDIO_ROOT / "lib" / "capabilities.js"
 
@@ -39,6 +41,8 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
         cls.jobs_source = read(JOBS_PAGE_JS)
         cls.providers_source = read(PROVIDERS_PAGE_JS)
         cls.keys_source = read(KEYS_PAGE_JS)
+        cls.generate_video_source = read(GENERATE_VIDEO_PAGE_JS)
+        cls.generate_video_shim_source = read(GENERATE_VIDEO_SHIM_JS)
         cls.wip_source = read(WIP_PAGE_JS)
         cls.capabilities_source = read(CAPABILITIES_JS)
 
@@ -49,6 +53,7 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
             {
                 "#/dashboard",
                 "#/generate/image",
+                "#/generate/video",
                 "#/jobs",
                 "#/assets",
                 "#/providers",
@@ -57,12 +62,36 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
         )
 
     def test_wip_routes_are_registered_and_render_unavailable_message(self) -> None:
-        for route in ("#/generate/video", "#/diagnostics", "#/jobs/:id", "#/assets/:id"):
+        for route in ("#/diagnostics", "#/jobs/:id", "#/assets/:id"):
             with self.subTest(route=route):
                 self.assertIn(f"router.register('{route}'", self.app_source)
         self.assertIn("renderUnavailable", self.wip_source)
         self.assertIn("wip.message", self.wip_source)
         self.assertIn("当前版本暂未开放", self.i18n_source)
+
+    def test_generate_video_page_is_catalog_aware_and_not_wip(self) -> None:
+        self.assertIn("features/generate-video/page.js", self.generate_video_shim_source)
+        self.assertIn("router.register('#/generate/video'", self.app_source)
+        self.assertIn("api.get('/admin/catalog')", self.generate_video_source)
+        self.assertIn("selectableVideoModels", self.generate_video_source)
+        self.assertIn("videoProvidersForModels", self.generate_video_source)
+        self.assertIn("item.media_type === 'video'", self.capabilities_source)
+        self.assertIn("item.selectable === true", self.capabilities_source)
+        self.assertIn("size_presets", self.generate_video_source)
+        self.assertIn("params", self.generate_video_source)
+        self.assertIn("ref_inputs", self.generate_video_source)
+        self.assertIn("capabilities", self.generate_video_source)
+        self.assertIn("api.post('/videos'", self.generate_video_source)
+        self.assertIn("safeErrorMessage", self.generate_video_source)
+        self.assertIn("job_id", self.generate_video_source)
+        self.assertIn("task_id", self.generate_video_source)
+        self.assertIn("navigate('#/jobs')", self.generate_video_source)
+        self.assertIn("navigate('#/assets')", self.generate_video_source)
+        self.assertNotIn("renderUnavailable", self.generate_video_source)
+        self.assertNotIn("wip.generateVideoTitle", self.generate_video_source)
+        for provider_term in ("Agnes", "agnes_video", "agnes-video"):
+            with self.subTest(provider_term=provider_term):
+                self.assertNotIn(provider_term, self.generate_video_source)
 
     def test_no_saas_concepts_or_frontend_frameworks(self) -> None:
         forbidden = ("team", "billing", "workspace", "organization", "subscription", "React", "Vue", "Svelte")

@@ -9,6 +9,7 @@ import { getTheme, toggleTheme } from './lib/theme.js';
 const NAV = [
   { hash: '#/dashboard', key: 'nav.dashboard', group: 'studio' },
   { hash: '#/generate/image', key: 'nav.generateImage', group: 'create' },
+  { hash: '#/generate/video', key: 'nav.generateVideo', group: 'create' },
   { hash: '#/jobs', key: 'nav.jobs', group: 'manage' },
   { hash: '#/assets', key: 'nav.assets', group: 'manage' },
   { hash: '#/providers', key: 'nav.providers', group: 'config' },
