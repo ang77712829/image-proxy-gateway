@@ -13,7 +13,7 @@ AI Agent / New-API / OpenAI SDK / AngeMedia Studio
         ↓
 AngeMedia Gateway
         ↓
-SiliconFlow Kolors → ModelScope Qwen / FLUX / Z-Image → Pollinations
+SiliconFlow Kolors → ModelScope Qwen / FLUX / Z-Image
         ↓
 Agnes image/video and OpenAI-compatible image providers when explicitly selected
         ↓
@@ -28,11 +28,12 @@ Stable local /generated/ URL
 - Lightweight route API: `POST /v1/media/route`
 - Agent Skill docs for image/video generation, routing, and prompt guidance
 - Built-in AngeMedia Studio web UI at `/`
+- Provider catalog API: `GET /v1/admin/catalog` — returns all built-in providers, models, capabilities, params, and size presets (admin-auth required)
 
 ## Default image chain
 
 ```text
-kolors → qwen → flux → z-image → z-turbo → pollinations
+kolors → qwen → flux → z-image → z-turbo
 ```
 
 Optional explicit providers:
@@ -40,6 +41,7 @@ Optional explicit providers:
 - `agnes-image`, `agnes-2.1`, `agnes-2.0`
 - `gpt-image-2`, `openai-image`
 - `agnes-video-v2.0` through `/v1/videos`
+- `pollinations` (experimental, disabled by default — not part of the fallback chain)
 
 ## Quick start
 
@@ -147,6 +149,7 @@ v0.2.0 provides a minimal Web Studio for basic administration:
 
 - Dashboard: health/session summary
 - Generate Image: prompt input with provider selection
+- Generate Video: catalog-aware minimal video submission page (fetches providers/models/capabilities from `/v1/admin/catalog`)
 - Jobs: list view of generation jobs
 - Assets: list view of generated/uploaded assets with thumbnails
 - Providers: minimal onboarding (create/enable/disable)
@@ -202,18 +205,17 @@ Both are read-only list views. Detail pages and full management UI are planned f
 
 The following features are not yet implemented:
 
-- Generate Video Web Studio UI (backend API available, UI planned)
-- Diagnostics page
 - Full Provider management (test/status/delete/sort/edit)
 - Provider fallback chain UI
-- Provider templates/catalog
-- Complete video generation workflow in Web Studio
+- AI Assistant (WIP / disabled — backend exists but no public routes, not part of v0.2.0 stable)
 - Worker/Queue/job_events UI
-- multi-user/SaaS/billing/quota
-- old admin restoration
+- Multi-user/SaaS/billing/quota
+- Old admin restoration
 - v0.1 data migration/backfill
 - Google provider support
 - Model override UI
+- Runtime routing is not yet fully catalog-driven (catalog YAML exists and is exposed via API, but `routing.py` still uses hardcoded `DEFAULT_CHAIN`)
+- Video ref_inputs upload (catalog declares ref_inputs; the Generate Video page shows them as read-only "coming soon")
 
 ## Legacy v0.1.0 reference
 
@@ -223,11 +225,11 @@ For new deployments, v0.2.0 is the recommended baseline. Use any legacy v0.1.0 R
 
 ## Version
 
-AngeMedia Gateway v0.2.0 - Core-Safe + Minimal Web Studio + Minimal Provider Onboarding
+AngeMedia Gateway v0.2.0 - Core-Safe + Minimal Web Studio + Minimal Provider Onboarding + Catalog-Aware Generate Video
 
 The previous experimental name was Image Proxy Gateway. There is no compatibility promise for the old name because the project had no public users yet.
 
-v0.2.0 focuses on safe foundation and minimal usable Web Studio. v0.2.x will recover more user-facing experience.
+v0.2.0 focuses on safe foundation, minimal usable Web Studio, and catalog-aware video generation. v0.2.x will recover more user-facing experience.
 
 ## License
 

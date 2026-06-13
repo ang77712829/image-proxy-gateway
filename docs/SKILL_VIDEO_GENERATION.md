@@ -8,9 +8,8 @@
 2. 判断输入模式：`t2v` / `first_frame` / `first_last_frame` / `reference`。
 3. 标记每张图的角色：`first_frame`、`last_frame`、`reference`。
 4. 把中文自然语言整理成适合视频模型的描述；必要时转成英文镜头语言。
-5. 组装 `/v1/videos` 请求。
-6. 决定是异步提交还是同步等待。
-7. 如果是异步：继续轮询 `GET /v1/videos/{task_id}`。
+5. 组装 `/v1/videos` 请求（`wait_for_completion: false`）。
+6. 提交后返回 `job_id` / `task_id`，提示用户到 Web Studio 的 Jobs / Assets 页面查看结果。Agent 不应轮询 API。
 
 ---
 
@@ -176,21 +175,11 @@
 POST /v1/videos
 ```
 
-然后：
+提交后返回 `job_id` / `task_id`，提示用户到 Web Studio 的 Jobs / Assets 页面查看结果。Agent 不应轮询 `GET /v1/videos/{task_id}`。
 
-```text
-GET /v1/videos/{task_id}
-```
+### 同步等待（非推荐）
 
-### 同步等待
-
-只有在用户明确要“等结果出来再返回”，或者宿主特别适合同步等待时，再传：
-
-```json
-{
-  "wait_for_completion": true
-}
-```
+`wait_for_completion=true` 会让单次请求阻塞直到视频生成完成，适合宿主环境明确支持同步等待的场景，但不作为 Agent 主推荐模式。普通场景应使用异步提交 + Web Studio 查看。
 
 ---
 
@@ -199,7 +188,7 @@ GET /v1/videos/{task_id}
 1. 首尾帧失败：降级为单图首帧视频。
 2. 多参考失败：只保留最关键图，其余改写进 prompt。
 3. 提示词过于简短：先增强再重试。
-4. 返回 task_id 但迟迟未完成：提示继续轮询，不要误判成失败。
+4. 返回 task_id 但迟迟未完成：提示用户到 Web Studio Jobs / Assets 查看，不要误判成失败。
 
 
 ---
@@ -225,7 +214,7 @@ GET /v1/videos/{task_id}
 异步模式：
 
 1. `POST /v1/videos` 返回 `task_id`
-2. 调用 `GET /v1/videos/{task_id}` 轮询
-3. 当返回里出现最终 `video_url` 时，网关会下载并返回本地 URL
+2. 提示用户到 Web Studio Jobs / Assets 查看结果
+3. `GET /v1/videos/{task_id}` 仅作为 Web Studio 或人工状态查询接口，不作为 Agent 主动轮询指令
 
 Agent 应优先使用 `video_url` 或 `local_path` 给用户发送文件，不要优先使用 `remote_video_url`。

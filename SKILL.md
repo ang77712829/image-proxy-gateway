@@ -1,8 +1,8 @@
 ---
 name: angemedia-gateway
 description: "当用户表达生成图片、画图、文生图、图生图、生成封面/海报/头像，或表达文生视频、图生视频、关键帧视频，并且需要通过 AngeMedia Gateway 调用图片/视频生成接口时使用。优先按意图触发，而不是只靠工具名触发。"
-version: v0.1.0
-compatible_gateway: ">=v0.1.0 <v0.2.0"
+version: v0.2.0
+compatible_gateway: ">=v0.2.0 <v0.3.0"
 author: 安歌 & 辰辰
 license: MIT
 metadata:
@@ -44,8 +44,8 @@ POST /v1/images/generations
 视频：
 
 ```text
-POST /v1/videos
-GET  /v1/videos/{task_id}
+POST /v1/videos           # 提交视频任务
+GET  /v1/videos/{task_id} # 查询任务状态（供 Web Studio 使用，Agent 不应主动轮询）
 ```
 
 路由：
@@ -73,8 +73,10 @@ X-API-Key: <GATEWAY_API_KEY>
 默认免费链：
 
 ```text
-kolors → qwen → flux → z-image → z-turbo → pollinations
+kolors → qwen → flux → z-image → z-turbo
 ```
+
+`pollinations` 为实验性渠道，默认关闭，不在默认降级链中。需要在 `.env` 中手动启用后，显式指定 `model: "pollinations"` 才会调用。
 
 | 别名 | 适合场景 |
 |---|---|
@@ -83,7 +85,7 @@ kolors → qwen → flux → z-image → z-turbo → pollinations
 | `flux` / `flux-krea` | 产品图、风景、自然光、家居 |
 | `z-image` | 创意概念、超现实 |
 | `z-turbo` | 写实人像、商业摄影、真人写真 |
-| `pollinations` | 最后兜底 |
+| `pollinations` | 实验性，默认关闭，需手动启用 |
 | `agnes-2.1` / `agnes-2.0` | Agnes 图片、图生图、编辑实验 |
 | `gpt-image-2` | 显式付费高质量图片 |
 | `agnes-video-v2.0` | 文生视频、图生视频、首尾帧视频 |
@@ -137,11 +139,7 @@ kolors → qwen → flux → z-image → z-turbo → pollinations
 }
 ```
 
-提交后轮询：
-
-```text
-GET /v1/videos/{task_id}
-```
+提交后返回 `job_id` / `task_id`，提示用户稍后到 Web Studio 的 Jobs / Assets 页面查看结果。Agent 不应轮询 API。
 
 图生视频：
 
@@ -201,4 +199,4 @@ GET /v1/videos/{task_id}
 
 ## 九、兼容网关版本
 
-本 Skill 兼容 AngeMedia Gateway `>=v0.1.0 <v0.2.0`。如果网关接口升级到 v0.2 或更高版本，应同步更新 Skill 包。
+本 Skill 兼容 AngeMedia Gateway `>=v0.2.0 <v0.3.0`。如果网关接口升级到 v0.3 或更高版本，应同步更新 Skill 包。

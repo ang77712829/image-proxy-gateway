@@ -1,6 +1,6 @@
 # Agnes 视频模型调用示例
 
-> 这里单独放 Agnes 视频能力，避免把视频的异步任务、轮询、帧数、关键帧说明塞进 `SKILL.md`。
+> 这里单独放 Agnes 视频能力，避免把视频的异步任务、状态查询、帧数、关键帧说明塞进 `SKILL.md`。
 > 官方文档入口：`https://agnes-ai.com/doc`。
 
 ## 一、视频调用入口
@@ -57,17 +57,19 @@ curl -X POST http://localhost:9890/v1/videos \
 }
 ```
 
-## 五、查询任务状态
+## 五、状态查询（非 Agent 主动轮询）
 
 ```bash
 curl http://localhost:9890/v1/videos/<task_id>
 ```
 
+这个接口用于 Web Studio、人工排查或明确需要查询单个任务状态的场景。Agent 提交异步视频任务后，应提示用户到 Web Studio Jobs / Assets 查看结果，不应主动轮询到完成。
+
 ## 六、视频 URL 字段说明
 
 Agnes 实测完成后可能把视频地址放在 `remixed_from_video_id` 字段。网关会把 `video_url`、`remixed_from_video_id`、`url`、`output_url` 这些常见字段统一归一化到 `video_url`。
 
-## 七、同步等待完成
+## 七、同步等待完成（非推荐）
 
 ```json
 {
