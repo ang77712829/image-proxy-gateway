@@ -14,7 +14,7 @@
 kolors → qwen → flux → z-image → z-turbo
 ```
 
-`pollinations` 为实验性渠道，默认关闭，不在默认降级链中。
+`pollinations` 为实验性渠道，缺省关闭，不在默认降级链中。
 
 视频当前主力：
 
@@ -66,7 +66,7 @@ agnes-video-v2.0
 | `flux` | ModelScope | `black-forest-labs/FLUX.1-Krea-dev` | 产品图、风景、自然光、摄影感场景 |
 | `z-image` | ModelScope | `Tongyi-MAI/Z-Image` | 创意概念、超现实、艺术实验 |
 | `z-turbo` | ModelScope | `Tongyi-MAI/Z-Image-Turbo` | 写实人像、商业摄影、快速出图 |
-| `pollinations` | Pollinations | 默认 `zimage` | 实验性，默认关闭，不在默认降级链中 |
+| `pollinations` | Pollinations | 默认 `zimage` | 实验性，缺省关闭，不在默认降级链中 |
 | `agnes-image` / `agnes-2.1` | Agnes AI | `agnes-image-2.1-flash` | 显式调用，Agnes 高质量文生图 |
 | `agnes-2.0` | Agnes AI | `agnes-image-2.0-flash` | 显式调用，兼容多图/编辑实验 |
 | `gpt-image-2` / `openai-image` | OpenAI-compatible | 由 `OPENAI_IMAGE_MODEL` 配置 | 显式付费高质量，不进默认链 |

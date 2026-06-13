@@ -11,6 +11,8 @@
 5. 组装 `/v1/videos` 请求（`wait_for_completion: false`）。
 6. 提交后返回 `job_id` / `task_id`，提示用户到 Web Studio 的 Jobs / Assets 页面查看结果。Agent 不应轮询 API。
 
+v0.2.0 没有独立后台进程持续检查 Agnes 视频直到完成。完成检查和本地化只会在 `wait_for_completion=true` 的同步请求内发生，或在后续 `GET /v1/videos/{task_id}` 状态查询时发生。Agent 默认不要自建持续查询循环。
+
 ---
 
 ## 二、输入模式判断
@@ -215,6 +217,7 @@ POST /v1/videos
 
 1. `POST /v1/videos` 返回 `task_id`
 2. 提示用户到 Web Studio Jobs / Assets 查看结果
-3. `GET /v1/videos/{task_id}` 仅作为 Web Studio 或人工状态查询接口，不作为 Agent 主动轮询指令
+3. `GET /v1/videos/{task_id}` 仅作为 Web Studio 或人工状态查询接口；查询时若发现任务完成，会触发本地化并写入 Assets
+4. Agent 不应主动持续查询，也不需要额外调度任务
 
 Agent 应优先使用 `video_url` 或 `local_path` 给用户发送文件，不要优先使用 `remote_video_url`。

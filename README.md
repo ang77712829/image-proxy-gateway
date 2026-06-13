@@ -29,6 +29,7 @@ Stable local /generated/ URL
 - Agent Skill docs for image/video generation, routing, and prompt guidance
 - Built-in AngeMedia Studio web UI at `/`
 - Provider catalog API: `GET /v1/admin/catalog` — returns all built-in providers, models, capabilities, params, and size presets (admin-auth required)
+- Admin account API and Studio account modal: view the current single-admin username, change username/password with `current_password`, then sign in again after the session is cleared
 
 ## Default image chain
 
@@ -148,11 +149,12 @@ v0.2.0 provides a minimal Web Studio for basic administration:
 **Features:**
 
 - Dashboard: health/session summary
-- Generate Image: prompt input with provider selection
+- Account modal: view the current single-admin username and change username/password; both changes require `current_password` and clear active sessions
+- Generate Image: catalog-aware prompt input with default route, catalog model selection, and custom provider model override
 - Generate Video: catalog-aware minimal video submission page (fetches providers/models/capabilities from `/v1/admin/catalog`)
 - Jobs: list view of generation jobs
 - Assets: list view of generated/uploaded assets with thumbnails
-- Providers: minimal onboarding (create/enable/disable)
+- Providers: custom provider onboarding and management; built-in, catalog, and reserved sections are read-only compact/folded summaries
 - API Keys: list/create/revoke for API mode
 
 **Admin login:**
@@ -180,23 +182,26 @@ ADMIN_COOKIE_SECURE=false
 6. Enable the provider
 7. Navigate to "Generate Image" (生成图片)
 8. Select your custom provider from dropdown
-9. Enter prompt and submit
+9. Optionally fill `provider_model` with the upstream model name for this request, or leave it blank to use the custom provider default
+10. Enter prompt and submit
 
-**Current scope:** Provider create and enable/disable only. Provider test/status/delete/sort/edit UI is not yet implemented.
+`provider_model` is a custom-provider upstream model override. It is not a local catalog model id and is only accepted when `model` is `custom:<provider_id>`.
+
+Built-in, catalog, and reserved providers are not editable from the v0.2.0 Studio. Their keys, base URLs, and enablement are controlled by environment/runtime configuration, and Studio shows them as read-only compact summaries. Pollinations is experimental, disabled by default, and excluded from the default usable chain unless explicitly enabled and selected.
 
 ## Jobs and Assets
 
 - **Jobs:** View list of generation jobs with status, type, duration
 - **Assets:** View list of generated/uploaded assets with thumbnails
 
-Both are read-only list views. Detail pages and full management UI are planned for future releases.
+Both are minimal usable list/visibility surfaces in v0.2.0. Generated image/video assets and uploaded assets are visible, but advanced job detail, event timelines, diagnostics, and full asset management are planned for later releases.
 
 ## Security notes
 
 - **Admin API:** Uses HttpOnly session cookie authentication
-- **API mode API Keys:** Used for `/v1/images/generations` and other generation endpoints
-- **API Key boundary:** API mode API Keys cannot access Admin API endpoints
-- **File access:** `/generated` and `/uploads` require authentication
+- **API mode API Keys:** Used for `/v1/images/generations`, `/v1/videos`, `/v1/jobs`, and protected media endpoints
+- **API Key boundary:** Gateway API Keys cannot access admin account APIs such as `/v1/admin/account`, `/v1/admin/username`, or `/v1/admin/password`
+- **File access:** `/generated/*` and `/uploads/*` require authentication and support authenticated `HEAD`
 - **Health endpoint:** `/health` returns minimal `{"status":"ok"}` (no secrets)
 - **Request hash:** Generation requests include dedupe/admission via request_hash
 - **Secrets protection:** Provider secrets, raw URLs, and sensitive data are not exposed in Web Studio summaries
@@ -205,17 +210,17 @@ Both are read-only list views. Detail pages and full management UI are planned f
 
 The following features are not yet implemented:
 
-- Full Provider management (test/status/delete/sort/edit)
-- Provider fallback chain UI
+- Full visual provider chain configuration UI
 - AI Assistant (WIP / disabled — backend exists but no public routes, not part of v0.2.0 stable)
-- Worker/Queue/job_events UI
-- Multi-user/SaaS/billing/quota
+- Background worker, Celery, Redis, Kubernetes deployment primitives, and job event timeline UI
+- Multi-user, tenant, SaaS, billing, and quota products
 - Old admin restoration
-- v0.1 data migration/backfill
+- Automatic legacy data import/backfill
 - Google provider support
-- Model override UI
-- Runtime routing is not yet fully catalog-driven (catalog YAML exists and is exposed via API, but `routing.py` still uses hardcoded `DEFAULT_CHAIN`)
-- Video ref_inputs upload (catalog declares ref_inputs; the Generate Video page shows them as read-only "coming soon")
+- Complete diagnostics UI
+- Runtime routing is not yet fully catalog-driven (catalog YAML exists and is exposed via API, while `routing.py` still owns the default image chain)
+- Video ref_inputs upload (catalog declares ref_inputs; the Generate Video page shows them as read-only planned fields)
+- React/Vue/npm build tooling is not part of this repository; Web Studio ships as static browser assets
 
 ## Legacy v0.1.0 reference
 
@@ -229,7 +234,7 @@ AngeMedia Gateway v0.2.0 - Core-Safe + Minimal Web Studio + Minimal Provider Onb
 
 The previous experimental name was Image Proxy Gateway. There is no compatibility promise for the old name because the project had no public users yet.
 
-v0.2.0 focuses on safe foundation, minimal usable Web Studio, and catalog-aware video generation. v0.2.x will recover more user-facing experience.
+v0.2.0 focuses on safe foundation, minimal usable Web Studio, catalog-aware Generate Image/Generate Video surfaces, and authenticated local media delivery. v0.2.x may recover more user-facing experience, but unsupported features above are not part of this release contract.
 
 ## License
 
