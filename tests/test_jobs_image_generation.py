@@ -313,6 +313,153 @@ class ImageJobRequestHashPopulateTest(_ImageJobTestBase):
         self.assertEqual(self._count_jobs(), 0)
 
 
+class ImageCustomProviderModelOverrideRedContractTest(_ImageJobTestBase):
+    """custom provider per-request provider_model override contracts."""
+
+    def _setup_custom_provider(self, provider_id: str = "override-custom-provider") -> str:
+        upsert_custom_provider({
+            "id": provider_id,
+            "name": "Override Provider",
+            "provider_type": "openai_image",
+            "base_url": "https://override.example.invalid/v1",
+            "api_key": "sk-override-secret",
+            "default_model": "default-provider-model",
+            "enabled": True,
+        })
+        return provider_id
+
+    def test_image_request_accepts_provider_model_extra_for_custom_route(self) -> None:
+        """ImageRequest should accept provider_model so API schema does not reject the new field."""
+        req = self._make_request(model="custom:override-custom-provider", provider_model="override-provider-model")
+
+        self.assertEqual(req.model, "custom:override-custom-provider")
+        self.assertEqual(getattr(req, "provider_model", None), "override-provider-model")
+
+    def test_custom_provider_model_override_updates_runtime_metadata_and_skips_default_chain(self) -> None:
+        """custom:<id> + provider_model should use provider_model for this request."""
+        provider_id = self._setup_custom_provider()
+        seen: dict[str, object] = {}
+
+        async def fake_custom_image(req, provider):
+            seen["provider_model"] = getattr(req, "provider_model", None)
+            seen["default_model"] = provider.get("default_model")
+            return copy.deepcopy(SUCCESS_RESULT)
+
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
+            patch("angemedia_gateway.services.media_service.generate_custom_openai_image", fake_custom_image):
+            result = await_compat(self.service.create_image(
+                self._make_request(
+                    prompt="custom override cat",
+                    model=f"custom:{provider_id}",
+                    provider_model="override-provider-model",
+                )
+            ))
+
+        mock_chain.assert_not_called()
+        self.assertEqual(seen["provider_model"], "override-provider-model")
+        self.assertEqual(seen["default_model"], "default-provider-model")
+        self.assertEqual(result["model"], "override-provider-model")
+        job = self._get_job_by_id(result["job_id"])
+        self.assertIsNotNone(job)
+        self.assertEqual(job["provider"], f"custom:{provider_id}")
+        self.assertEqual(job["model"], "override-provider-model")
+
+    def test_custom_provider_missing_or_empty_provider_model_keeps_default_model(self) -> None:
+        """provider_model missing/empty should preserve existing custom default_model behavior."""
+        provider_id = self._setup_custom_provider("override-default-provider")
+
+        async def fake_custom_image(req, provider):
+            return copy.deepcopy(SUCCESS_RESULT)
+
+        for provider_model in (None, ""):
+            with self.subTest(provider_model=provider_model):
+                kwargs = {"prompt": "custom default cat", "model": f"custom:{provider_id}"}
+                if provider_model is not None:
+                    kwargs["provider_model"] = provider_model
+                with patch("angemedia_gateway.services.media_service.generate_custom_openai_image", fake_custom_image):
+                    result = await_compat(self.service.create_image(self._make_request(**kwargs)))
+                self.assertEqual(result["model"], "default-provider-model")
+
+    def test_custom_provider_adapter_sends_provider_model_to_openai_payload(self) -> None:
+        """custom OpenAI-compatible adapter should send provider_model, not the stored default_model."""
+        from angemedia_gateway.providers.custom import generate_custom_openai_image
+        import httpx
+
+        class RecordingAsyncClient:
+            instances: list["RecordingAsyncClient"] = []
+
+            def __init__(self, *args, **kwargs) -> None:
+                self.kwargs = kwargs
+                self.posts: list[dict] = []
+                RecordingAsyncClient.instances.append(self)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args) -> None:
+                return None
+
+            async def post(self, url: str, **kwargs):
+                self.posts.append({"url": url, **kwargs})
+                return httpx.Response(200, json=copy.deepcopy(SUCCESS_RESULT))
+
+        provider = {
+            "enabled": True,
+            "base_url": "https://example.com/v1",
+            "api_key": "sk-override-secret",
+            "default_model": "default-provider-model",
+        }
+        req = self._make_request(
+            model="custom:override-custom-provider",
+            provider_model="override-provider-model",
+            size="1024x1024",
+        )
+
+        with patch("httpx.AsyncClient", new=RecordingAsyncClient):
+            await_compat(generate_custom_openai_image(req, provider))
+
+        self.assertEqual(len(RecordingAsyncClient.instances), 1)
+        request = RecordingAsyncClient.instances[0].posts[0]
+        self.assertEqual(request["url"], "https://example.com/v1/images/generations")
+        self.assertIs(RecordingAsyncClient.instances[0].kwargs.get("trust_env"), False)
+        self.assertEqual(request["json"]["model"], "override-provider-model")
+        rendered = json.dumps(request["json"])
+        self.assertNotIn("sk-override-secret", rendered)
+        self.assertNotIn("Authorization", rendered)
+
+    def test_non_custom_provider_model_override_returns_safe_400_before_generation(self) -> None:
+        """provider_model is only meaningful with model=custom:<id>; builtin routes should reject it safely."""
+        from fastapi.testclient import TestClient
+        from angemedia_gateway.routing import RouteTarget
+        from angemedia_gateway.server import app
+        from angemedia_gateway.state import create_gateway_api_key
+
+        key_item = create_gateway_api_key(name="provider-model-safety-red")
+        client = TestClient(app)
+        provider = FakeImageProvider(SUCCESS_RESULT)
+        with patch("angemedia_gateway.services.media_service.resolve_chain") as mock_chain, \
+            patch("angemedia_gateway.services.media_service.PROVIDERS", {"siliconflow": provider}):
+            mock_chain.return_value = [RouteTarget(provider="siliconflow", model="kolors")]
+            response = client.post(
+                "/v1/images/generations",
+                json={
+                    "prompt": "builtin cat",
+                    "model": "kolors",
+                    "provider_model": "sk-provider-model-secret raw body",
+                    "size": "1024x1024",
+                },
+                headers={"Authorization": f"Bearer {key_item['key']}"},
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        text = response.text
+        self.assertNotIn("sk-provider-model-secret", text)
+        self.assertNotIn("raw body", text)
+        self.assertNotIn("api_key", text)
+        self.assertNotIn("Authorization", text)
+        self.assertNotIn("Bearer", text)
+
+
 # ── 8-9. generations 和 assets 仍正常 ─────────────────
 
 class ImageJobLegacyRecordsTest(_ImageJobTestBase):

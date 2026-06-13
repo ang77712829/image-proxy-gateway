@@ -56,6 +56,7 @@ _IMAGE_FIELDS = {
     "safe",
     "negative_prompt",
     "seed",
+    "provider_model",
 }
 
 _VIDEO_FIELDS = {
@@ -148,6 +149,14 @@ def _field(source: Any, name: str, default: Any = None) -> Any:
     if isinstance(source, Mapping):
         return source.get(name, default)
     return getattr(source, name, default)
+
+
+def _non_empty_text_field(source: Any, name: str) -> str | None:
+    value = _field(source, name)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _extras(source: Any, known_fields: set[str]) -> dict[str, Any]:
@@ -287,6 +296,9 @@ def build_image_request_hash_payload(
     elif provider_mode == "custom":
         payload["custom_provider_id"] = custom_provider_id
         payload["custom_default_model"] = custom_default_model
+        provider_model = _non_empty_text_field(req, "provider_model")
+        if provider_model:
+            payload["provider_model"] = provider_model
     else:
         raise ValueError(f"unsupported image provider_mode: {provider_mode}")
 

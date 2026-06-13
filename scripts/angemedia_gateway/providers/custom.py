@@ -26,7 +26,7 @@ async def generate_custom_openai_image(req: ImageRequest, provider: dict[str, An
     except ValueError as exc:
         raise BackendUnavailable(str(exc)) from exc
     api_key = str(provider.get("api_key") or "")
-    model = str(provider.get("default_model") or req.model or "")
+    model = str(req.provider_model or provider.get("default_model") or "")
     if not base_url or not model:
         raise BackendUnavailable("自定义渠道缺少 base_url 或 default_model")
 

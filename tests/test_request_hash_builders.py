@@ -126,6 +126,54 @@ class ImageRequestHashBuilderTest(unittest.TestCase):
         self.assertNotEqual(_payload_hash(first), _payload_hash(second))
         self.assertNotEqual(_payload_hash(first), _payload_hash(third))
 
+    def test_custom_provider_model_override_affects_hash_and_payload(self) -> None:
+        """provider_model selects the real custom upstream model and must affect dedupe."""
+        first = _image_payload(
+            ImageRequest(prompt="cat", model="custom:abc", provider_model="image-a"),
+            provider_mode="custom",
+            resolved_chain=None,
+            custom_provider_id="abc",
+            custom_default_model="default-image",
+        )
+        second = _image_payload(
+            ImageRequest(prompt="cat", model="custom:abc", provider_model="image-b"),
+            provider_mode="custom",
+            resolved_chain=None,
+            custom_provider_id="abc",
+            custom_default_model="default-image",
+        )
+
+        self.assertEqual(first["provider_model"], "image-a")
+        self.assertEqual(second["provider_model"], "image-b")
+        self.assertNotEqual(_payload_hash(first), _payload_hash(second))
+
+        rendered = json.dumps(first, ensure_ascii=False)
+        self.assertNotIn("api_key", rendered)
+        self.assertNotIn("authorization", rendered.lower())
+        self.assertNotIn("secret", rendered.lower())
+        self.assertNotIn("raw body", rendered.lower())
+
+    def test_empty_custom_provider_model_override_is_stable_like_missing(self) -> None:
+        """Missing and empty provider_model should both mean use the stored custom default_model."""
+        missing = _image_payload(
+            ImageRequest(prompt="cat", model="custom:abc"),
+            provider_mode="custom",
+            resolved_chain=None,
+            custom_provider_id="abc",
+            custom_default_model="default-image",
+        )
+        empty = _image_payload(
+            ImageRequest(prompt="cat", model="custom:abc", provider_model=""),
+            provider_mode="custom",
+            resolved_chain=None,
+            custom_provider_id="abc",
+            custom_default_model="default-image",
+        )
+
+        self.assertEqual(missing, empty)
+        self.assertNotIn("provider_model", missing)
+        self.assertEqual(_payload_hash(missing), _payload_hash(empty))
+
     def test_unknown_extra_field_is_not_included(self) -> None:
         payload = _image_payload(ImageRequest(prompt="cat", whimsical="ignored"))
         self.assertNotIn("whimsical", json.dumps(payload))
@@ -245,6 +293,14 @@ class VideoRequestHashBuilderTest(unittest.TestCase):
                 {"type": "path", "path": "/generated/b.png"},
             ],
         )
+
+    def test_video_hash_ignores_image_provider_model_override_field(self) -> None:
+        """provider_model is image/custom-only and must not change video request hashing."""
+        base = _video_payload(VideoRequest(prompt="cat", model="agnes-video-v2.0"))
+        with_extra = _video_payload(VideoRequest(prompt="cat", model="agnes-video-v2.0", provider_model="image-only"))
+
+        self.assertEqual(base, with_extra)
+        self.assertEqual(_payload_hash(base), _payload_hash(with_extra))
 
 
 class RequestHashBuilderPurityTest(unittest.TestCase):

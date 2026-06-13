@@ -21,6 +21,15 @@ class ImageRequest(BaseModel):
     safe: Optional[Any] = None
     negative_prompt: Optional[str] = None
     seed: Optional[int] = None
+    provider_model: Optional[str] = None
+
+    @field_validator("provider_model", mode="before")
+    @classmethod
+    def normalize_provider_model(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 class RouteRequest(BaseModel):

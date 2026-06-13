@@ -28,6 +28,10 @@ class CustomProviderNotFound(RuntimeError):
     """Requested custom provider does not exist."""
 
 
+class InvalidImageRequest(RuntimeError):
+    """Image request contains unsupported provider routing semantics."""
+
+
 class NoImageProviderAvailable(RuntimeError):
     """No enabled image provider can handle the request."""
 
@@ -54,7 +58,10 @@ async def create_image(
     job_lifecycle: JobLifecycle | None = None,
 ) -> dict[str, Any]:
     lifecycle = job_lifecycle or JobLifecycle()
-    if req.model and req.model.startswith("custom:"):
+    custom_route = bool(req.model and req.model.startswith("custom:"))
+    if _provider_model_override(req) and not custom_route:
+        raise InvalidImageRequest("provider_model is only supported with custom image providers")
+    if custom_route:
         return await create_custom_image(
             req,
             get_custom_provider_func=get_custom_provider_func,
@@ -92,6 +99,7 @@ async def create_custom_image(
     provider = get_custom_provider_func(provider_id, include_secret=True)
     if provider is None:
         raise CustomProviderNotFound(f"自定义渠道不存在：{provider_id}")
+    upstream_model = _custom_upstream_model(req, provider, provider_id)
 
     request_hash, request_hash_version = request_hash_fields(
         build_image_request_hash_payload(
@@ -117,19 +125,19 @@ async def create_custom_image(
         job_id,
         kind="image",
         provider=f"custom:{provider_id}",
-        model=provider.get("default_model"),
+        model=upstream_model,
         started_at=started_at,
     )
     try:
         result = await generate_custom_image_func(req, provider)
         if req.response_format == "url":
-            result = await localize_image_result_func(result, f"custom_{provider_id}", provider.get("default_model", "custom"))
+            result = await localize_image_result_func(result, f"custom_{provider_id}", upstream_model)
         elif req.response_format == "b64_json":
             result = await maybe_to_b64_func(result, req.response_format)
 
         duration_ms = int((time.perf_counter() - started) * 1000)
         result["provider"] = f"custom:{provider_id}"
-        result["model"] = str(provider.get("default_model") or f"custom:{provider_id}")
+        result["model"] = upstream_model
         result["duration_ms"] = duration_ms
         return _complete_image_success(
             req=req,
@@ -138,13 +146,13 @@ async def create_custom_image(
             record_generation_func=record_generation_func,
             save_generated_asset_func=save_generated_asset_func,
             job_lifecycle=job_lifecycle,
-            history_model=f"custom:{provider_id}",
+            history_model=upstream_model,
             provider=f"custom:{provider_id}",
             request_model=req.model,
             input_mode="custom_provider",
             started_at=started_at,
             duration_ms=duration_ms,
-            asset_model=f"custom:{provider_id}",
+            asset_model=upstream_model,
         )
     except Exception as exc:
         _mark_image_failure(job_id, exc, "custom_provider_failure", job_lifecycle)
@@ -268,6 +276,18 @@ def _create_image_job(
         request_hash=request_hash,
         request_hash_version=request_hash_version,
     )
+
+
+def _provider_model_override(req: ImageRequest) -> str | None:
+    value = getattr(req, "provider_model", None)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _custom_upstream_model(req: ImageRequest, provider: Mapping[str, Any], provider_id: str) -> str:
+    return _provider_model_override(req) or str(provider.get("default_model") or f"custom:{provider_id}")
 
 
 def _complete_image_success(

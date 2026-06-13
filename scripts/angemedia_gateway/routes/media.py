@@ -19,6 +19,7 @@ from ..services.media_service import (
     NoImageProviderAvailable,
     VideoProviderDisabled,
 )
+from ..services.image_generation import InvalidImageRequest
 from ..repositories.settings import builtin_provider_enabled, list_custom_providers
 from ..runtime import require_auth
 
@@ -30,6 +31,8 @@ media_service = MediaService()
 async def _create_image_response(req: ImageRequest) -> dict[str, Any]:
     try:
         return await media_service.create_image(req)
+    except InvalidImageRequest as exc:
+        raise HTTPException(status_code=400, detail={"message": str(exc), "code": "invalid_image_request"}) from exc
     except CustomProviderNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except NoImageProviderAvailable as exc:
