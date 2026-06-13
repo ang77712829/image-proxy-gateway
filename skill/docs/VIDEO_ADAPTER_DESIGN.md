@@ -1,5 +1,7 @@
 # 视频适配拆分设计
 
+> Archived / historical design reference, not current v0.2.0 release contract.
+
 ## 为什么要拆出来
 
 图片生成是这个网关的主线。视频生成参数多、耗时长、异步轮询复杂，如果直接堆进应用装配入口，主流程会越来越臃肿，也会影响 Agent 读取 Skill 时的清晰度。

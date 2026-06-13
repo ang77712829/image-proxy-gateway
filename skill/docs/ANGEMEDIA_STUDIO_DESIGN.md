@@ -1,5 +1,7 @@
 # AngeMedia Studio 设计说明
 
+> Archived / historical design reference, not current v0.2.0 release contract.
+
 AngeMedia Studio 是 v0.1.0 内置的轻量 Web UI。
 
 ## 设计目标

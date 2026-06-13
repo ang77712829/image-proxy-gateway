@@ -32,7 +32,7 @@ curl -X POST http://localhost:9890/v1/images/generations \
 
       <div class="section-head"><div><p class="eyebrow">Video</p><h2>视频任务</h2></div></div>
       <pre class="json-box">POST /v1/videos
-GET  /v1/videos/{task_id}
+GET  /v1/videos/{task_id}  # 状态查询；Agent 不应主动轮询到完成
 
 curl -X POST http://localhost:9890/v1/videos \
   -H "Content-Type: application/json" \

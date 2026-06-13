@@ -182,7 +182,7 @@ def build_route_response(req: RouteRequest) -> dict[str, Any]:
             "num_frames": 121,
             "frame_rate": 24,
             "prompt_enhancement_recommended": should_enhance_prompt(req.prompt, "auto"),
-            "notes": "视频默认异步提交，完成后轮询 /v1/videos/{task_id}；生成结果会尽量本地化到 /generated/。",
+            "notes": "视频默认异步提交，提交后通过 Web Studio Jobs/Assets 查看，或用 /v1/videos/{task_id} 做状态查询；生成结果会尽量本地化到 /generated/。",
         }
 
     model = choose_image_model(req.prompt, req.requested_model)
