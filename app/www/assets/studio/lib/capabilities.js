@@ -1,17 +1,3 @@
-export const IMAGE_SIZE_PRESETS = [
-  { value: '1024x1024', label: '1024 x 1024' },
-  { value: '1024x1536', label: '1024 x 1536' },
-  { value: '1536x1024', label: '1536 x 1024' },
-  { value: 'custom', label: 'Custom' },
-];
-
-export const IMAGE_CAPABILITY_SEED = {
-  default: {
-    supportsCustomSize: true,
-    presets: IMAGE_SIZE_PRESETS.map((item) => item.value).filter((value) => value !== 'custom'),
-  },
-};
-
 export function validateCustomSize(value) {
   const match = String(value || '').trim().match(/^([1-9]\d{1,3})x([1-9]\d{1,3})$/i);
   if (!match) {
@@ -63,9 +49,33 @@ export function selectableVideoModels(result) {
   ));
 }
 
+export function selectableImageModels(result) {
+  return modelsFromCatalog(result).filter((item) => (
+    item &&
+    typeof item === 'object' &&
+    item.media_type === 'image' &&
+    item.selectable === true &&
+    item.status === 'release' &&
+    item.id
+  ));
+}
+
 export function videoProvidersForModels(result, models) {
   const providerIds = new Set(models.map((item) => item.provider_id).filter(Boolean));
   return providersFromCatalog(result).filter((item) => providerIds.has(item.id));
+}
+
+export function imageProvidersForModels(result, models) {
+  const providerIds = new Set(models.map((item) => item.provider_id).filter(Boolean));
+  return providersFromCatalog(result).filter((item) => providerIds.has(item.id));
+}
+
+export function imageSizeOptions(model) {
+  const presets = Array.isArray(model?.size_presets) ? model.size_presets : [];
+  return [
+    ...presets.map((preset) => ({ value: preset, label: preset })),
+    { value: 'custom', label: 'Custom' },
+  ];
 }
 
 export function parseSizePreset(value) {

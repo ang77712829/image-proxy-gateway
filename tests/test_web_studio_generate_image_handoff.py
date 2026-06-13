@@ -30,12 +30,17 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
         cls.safe_error_source = read_source(SAFE_ERROR_JS)
         cls.i18n_source = read_source(I18N_JS)
 
-    def test_loads_provider_safe_summary_for_custom_provider_options(self) -> None:
-        """Generate Image should load existing safe provider summaries, not a new backend API."""
+    def test_loads_catalog_for_image_capabilities_and_safe_provider_summaries(self) -> None:
+        """Generate Image should load catalog capabilities plus custom provider safe summaries."""
+        self.assertRegex(
+            self.source,
+            r"api\.get\(\s*['\"]\/admin\/catalog['\"]\s*\)",
+            "Generate Image must use GET /v1/admin/catalog for builtin/catalog image capabilities.",
+        )
         self.assertRegex(
             self.source,
             r"api\.get\(\s*['\"]\/admin\/providers['\"]\s*\)",
-            "Generate Image should reuse GET /v1/admin/providers safe summaries.",
+            "Generate Image may still use GET /v1/admin/providers for custom provider safe summaries.",
         )
 
     def test_does_not_call_deferred_provider_admin_apis(self) -> None:
@@ -60,13 +65,24 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
         self.assertIn("providerOptions", self.source)
         self.assertIn("providerSelect", self.source)
 
+    def test_catalog_image_models_are_filtered_by_media_type_and_selectable(self) -> None:
+        """Catalog-backed Generate Image options should only include selectable image models."""
+        self.assertIn("selectableImageModels", self.capabilities_source)
+        self.assertIn("imageProvidersForModels", self.capabilities_source)
+        self.assertIn("item.media_type === 'image'", self.capabilities_source)
+        self.assertIn("item.selectable === true", self.capabilities_source)
+        self.assertIn("selectableImageModels", self.source)
+        self.assertIn("imageProvidersForModels", self.source)
+
     def test_custom_provider_submit_uses_custom_model_id_without_secret_config(self) -> None:
-        """Selecting a custom provider should submit model: custom:<id>."""
+        """Selecting a custom provider should route with custom:<id> and submit provider_model."""
         self.assertIn("custom:", self.source)
         self.assertTrue(
             re.search(r"\bmodel\s*:", self.source) or re.search(r"\.model\s*=", self.source),
             "The image generation payload should include model when a custom provider is selected.",
         )
+        self.assertIn("provider_model", self.source)
+        self.assertNotIn("modelInput.readOnly = true", self.source)
 
     def test_generate_image_source_does_not_reference_secret_provider_fields(self) -> None:
         """Generate Image handoff must not display or submit provider secret/config fields."""
@@ -95,10 +111,12 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
         self.assertRegex(self.source, r"\bprompt\b")
         self.assertRegex(self.source, r"response_format\s*:\s*['\"]url['\"]")
 
-    def test_size_select_defaults_and_payload_are_present(self) -> None:
-        """Generate Image should expose a minimal size select and include size in the payload."""
-        self.assertIn("IMAGE_SIZE_PRESETS", self.source)
-        self.assertIn("1024x1024", self.source)
+    def test_size_presets_are_catalog_driven_and_custom_size_is_preserved(self) -> None:
+        """Generate Image should use catalog size_presets instead of one fixed preset list."""
+        self.assertNotIn("IMAGE_SIZE_PRESETS", self.source)
+        self.assertIn("size_presets", self.source)
+        self.assertIn("generateImage.sizeCapabilityUnknown", self.source)
+        self.assertIn("generateImage.sizeCapabilityUnknown", self.i18n_source)
         self.assertRegex(
             self.source,
             r"\bsize\s*:",
@@ -111,6 +129,13 @@ class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
         self.assertRegex(self.capabilities_source, r"\^\(\[1-9\]\\d\{1,3\}\)x\(\[1-9\]\\d\{1,3\}\)")
         self.assertIn("generateImage.sizeInvalidFormat", self.i18n_source)
         self.assertIn("generateImage.sizeInvalidRange", self.i18n_source)
+
+    def test_submit_payload_contract_keeps_model_routing_without_provider_field(self) -> None:
+        """The backend contract keeps model as route selector and provider_model custom-only."""
+        self.assertIn("api.post('/images/generations'", self.source)
+        self.assertRegex(self.source, r"\.model\s*=")
+        self.assertNotIn("payload.provider", self.source)
+        self.assertIn("provider_model", self.source)
 
     def test_duplicate_conflict_uses_safe_short_message(self) -> None:
         """HTTP 409 duplicate responses should use a sanitized Generate Image message."""

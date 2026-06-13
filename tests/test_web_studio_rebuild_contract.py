@@ -187,9 +187,20 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
                 self.assertIsNotNone(match)
                 self.assertNotIn("radial-gradient", match.group("body"))
 
+    def test_generate_image_catalog_capability_contract(self) -> None:
+        """Generate Image should follow the same minimal catalog-aware pattern as Generate Video."""
+        generate_image_source = read(STUDIO_ROOT / "features" / "generate-image" / "page.js")
+        self.assertIn("api.get('/admin/catalog')", generate_image_source)
+        self.assertIn("selectableImageModels", generate_image_source)
+        self.assertIn("imageProvidersForModels", generate_image_source)
+        self.assertIn("item.media_type === 'image'", self.capabilities_source)
+        self.assertIn("item.selectable === true", self.capabilities_source)
+        self.assertIn("size_presets", generate_image_source)
+        self.assertIn("provider_model", generate_image_source)
+        self.assertNotIn("IMAGE_SIZE_PRESETS", generate_image_source)
+
     def test_generate_image_custom_size_contract(self) -> None:
         self.assertIn("validateCustomSize", self.capabilities_source)
-        self.assertIn("1024x1024", self.capabilities_source)
         self.assertIn("custom", self.capabilities_source)
 
 

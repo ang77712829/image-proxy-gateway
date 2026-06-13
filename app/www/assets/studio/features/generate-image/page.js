@@ -8,34 +8,88 @@ import { pageHeader, panel, metaGrid } from '../../components/page.js';
 import { emptyState, errorState, loadingState } from '../../components/states.js';
 import { toast } from '../../components/toast.js';
 import { showWipFeature } from '../../components/wip.js';
-import { IMAGE_SIZE_PRESETS, isSelectableImageProvider, providerModelValue, providersFromResponse, validateCustomSize } from '../../lib/capabilities.js';
+import {
+  imageProvidersForModels,
+  imageSizeOptions,
+  isSelectableImageProvider,
+  providerModelValue,
+  providersFromResponse,
+  selectableImageModels,
+  validateCustomSize,
+} from '../../lib/capabilities.js';
 import { safeAssetHref, buildAssetDownloadName } from '../../lib/asset-url.js';
 import { errorDiagnostics, safeErrorMessage } from '../../lib/safe-error.js';
 import { formatDate, formatDuration, shortId, truncateText } from '../../lib/format.js';
 import { safeText } from '../../lib/security.js';
 import { navigate } from '../../router.js';
 
+function option(label, value, disabled = false) {
+  return { label, value, disabled };
+}
+
 function imageUrlFromResult(result) {
   const item = Array.isArray(result?.data) ? result.data[0] : null;
   return item?.url || '';
 }
 
-function providerOptions(providers) {
-  const options = [{ value: '', label: t('generateImage.providerDefault') }];
-  providers.filter(isSelectableImageProvider).forEach((provider) => {
-    const model = provider.default_model ? ` · ${provider.default_model}` : '';
-    options.push({
-      value: providerModelValue(provider.id),
-      label: `${provider.name || provider.id}${model}`,
-    });
-  });
-  return options;
+function providerLabel(provider) {
+  return provider?.display_name || provider?.name || provider?.id || '-';
+}
+
+function modelProvider(providers, model) {
+  return providers.find((provider) => provider.id === model?.provider_id) || null;
+}
+
+function modelLabel(providers, model) {
+  const provider = modelProvider(providers, model);
+  const prefix = provider ? `${providerLabel(provider)} / ` : '';
+  return `${prefix}${model.display_name || model.id}`;
+}
+
+function routeModelValue(model) {
+  const aliases = Array.isArray(model?.aliases) ? model.aliases.filter(Boolean) : [];
+  return aliases[0] || model?.id || '';
+}
+
+function catalogProviderValue(providerId) {
+  return `catalog:${providerId}`;
+}
+
+function catalogProviderIdFromValue(value) {
+  return value && value.startsWith('catalog:') ? value.slice('catalog:'.length) : '';
 }
 
 function customProviderByValue(providers, value) {
   if (!value || !value.startsWith('custom:')) return null;
   const id = value.slice('custom:'.length);
   return providers.find((provider) => provider.id === id) || null;
+}
+
+function modelsForProvider(models, providerId) {
+  return models.filter((model) => !providerId || model.provider_id === providerId);
+}
+
+function modelById(models, id) {
+  return models.find((model) => model.id === id) || null;
+}
+
+function replaceOptions(node, items) {
+  node.textContent = '';
+  items.forEach((item) => {
+    node.appendChild(el('option', { value: item.value, disabled: item.disabled }, item.label));
+  });
+}
+
+function providerOptions(catalogProviders, customProviders) {
+  const options = [option(t('generateImage.providerDefault'), '')];
+  catalogProviders.forEach((provider) => {
+    options.push(option(providerLabel(provider), catalogProviderValue(provider.id)));
+  });
+  customProviders.forEach((provider) => {
+    const model = provider.default_model ? ` - ${provider.default_model}` : '';
+    options.push(option(`${provider.name || provider.id}${model}`, providerModelValue(provider.id)));
+  });
+  return options;
 }
 
 function recentJobCard(job) {
@@ -118,9 +172,54 @@ function renderResultError(target, error) {
   );
 }
 
+function renderSelectionSummary(target, catalogProviders, model, customProvider, routeMode) {
+  if (routeMode === 'default') {
+    mount(target, emptyState(t('generateImage.defaultRouteSummary')));
+    return;
+  }
+  if (customProvider) {
+    mount(target,
+      el('div', { class: 'video-model-summary' },
+        el('div', { class: 'job-card-header' },
+          el('div', {},
+            el('p', { class: 'card-title' }, safeText(customProvider.name || customProvider.id, 80)),
+            el('p', { class: 'card-subtitle' }, t('generateImage.customProviderSummary')),
+          ),
+          badge(t('providers.customProviders'), 'info'),
+        ),
+        metaGrid([
+          { label: t('generateImage.model'), value: safeText(customProvider.default_model || '-', 96) },
+        ]),
+      ),
+    );
+    return;
+  }
+  const provider = modelProvider(catalogProviders, model);
+  mount(target,
+    el('div', { class: 'video-model-summary' },
+      el('div', { class: 'job-card-header' },
+        el('div', {},
+          el('p', { class: 'card-title' }, safeText(model?.display_name || model?.id || '-', 80)),
+          el('p', { class: 'card-subtitle' }, safeText(providerLabel(provider), 80)),
+        ),
+        badge(safeText(model?.status || '-', 24), model?.status === 'release' ? 'success' : 'warning'),
+      ),
+      metaGrid([
+        { label: t('generateImage.provider'), value: providerLabel(provider) },
+        { label: t('generateImage.model'), value: safeText(model?.provider_model || routeModelValue(model), 96) },
+        { label: t('generateImage.size'), value: (model?.size_presets || []).join(', ') },
+      ]),
+    ),
+  );
+}
+
+async function loadCatalog() {
+  return api.get('/admin/catalog');
+}
+
 async function loadProviders() {
   const result = await api.get('/admin/providers');
-  return providersFromResponse(result);
+  return providersFromResponse(result).filter(isSelectableImageProvider);
 }
 
 async function loadRecentImageJobs() {
@@ -128,13 +227,13 @@ async function loadRecentImageJobs() {
   return Array.isArray(result?.data) ? result.data : [];
 }
 
-function buildPage(providers, recentJobs, providerLoadFailed) {
-  const providerSelect = select(providerOptions(providers), { name: 'provider' });
+function buildPage(catalog, customProviders, recentJobs, providerLoadFailed) {
+  const catalogModels = selectableImageModels(catalog);
+  const catalogProviders = imageProvidersForModels(catalog, catalogModels);
+  const providerSelect = select(providerOptions(catalogProviders, customProviders), { name: 'provider' });
+  const modelSelect = select([], { name: 'model' });
   const modelInput = input({ name: 'model', type: 'text', autocomplete: 'off', placeholder: t('generateImage.modelPlaceholder') });
-  const sizeSelect = select(IMAGE_SIZE_PRESETS.map((item) => ({
-    value: item.value,
-    label: item.value === 'custom' ? t('generateImage.customSize') : item.label,
-  })), { name: 'size' });
+  const sizeSelect = select([], { name: 'size' });
   const customSizeInput = input({
     name: 'custom_size',
     type: 'text',
@@ -148,25 +247,69 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
     placeholder: t('generateImage.promptPlaceholder'),
   });
   const resultPanel = el('div', { class: 'result-frame' });
+  const selectionSummary = el('div', { class: 'video-summary-frame' });
   const providerStatus = el('p', { class: providerLoadFailed ? 'error-text' : 'field-help' },
     providerLoadFailed ? t('generateImage.providerLoadFailed') : t('generateImage.providerHelp'),
   );
+  const sizeCapabilityWarning = el('p', { class: 'field-help' }, t('generateImage.sizeCapabilityUnknown'));
   const submit = button(t('generateImage.submit'), { variant: 'primary' });
+  const modelSelectField = field(t('generateImage.model'), modelSelect);
+  const modelInputField = field(t('generateImage.model'), modelInput);
 
-  function syncProviderModel() {
-    const provider = customProviderByValue(providers, providerSelect.value);
-    if (provider) {
-      modelInput.value = provider.default_model || '';
-      modelInput.readOnly = true;
-      modelInput.placeholder = t('generateImage.customProviderModel');
-    } else {
-      modelInput.readOnly = false;
-      modelInput.placeholder = t('generateImage.modelPlaceholder');
-    }
+  function currentCatalogProviderId() {
+    return catalogProviderIdFromValue(providerSelect.value);
   }
 
-  function syncCustomSize() {
+  function currentCatalogModels() {
+    return modelsForProvider(catalogModels, currentCatalogProviderId());
+  }
+
+  function currentCatalogModel() {
+    return modelById(catalogModels, modelSelect.value) || currentCatalogModels()[0] || null;
+  }
+
+  function syncSizeFields() {
     customSizeInput.hidden = sizeSelect.value !== 'custom';
+  }
+
+  function syncSizeOptions() {
+    const model = currentCatalogProviderId() ? currentCatalogModel() : null;
+    const options = imageSizeOptions(model);
+    replaceOptions(sizeSelect, options);
+    const presets = Array.isArray(model?.size_presets) ? model.size_presets : [];
+    sizeSelect.value = presets[0] || 'custom';
+    sizeCapabilityWarning.hidden = presets.length > 0;
+    syncSizeFields();
+  }
+
+  function syncModelOptions(providerChanged = false) {
+    const catalogProviderId = currentCatalogProviderId();
+    const customProvider = customProviderByValue(customProviders, providerSelect.value);
+    modelSelectField.hidden = !catalogProviderId;
+    modelInputField.hidden = Boolean(catalogProviderId);
+
+    if (catalogProviderId) {
+      const models = currentCatalogModels();
+      replaceOptions(modelSelect, models.map((model) => option(modelLabel(catalogProviders, model), model.id)));
+      if (!modelById(models, modelSelect.value) && models[0]) {
+        modelSelect.value = models[0].id;
+      }
+    } else if (customProvider) {
+      if (providerChanged) modelInput.value = customProvider.default_model || '';
+      modelInput.placeholder = t('generateImage.customProviderModel');
+    } else {
+      if (providerChanged) modelInput.value = '';
+      modelInput.placeholder = t('generateImage.modelPlaceholder');
+    }
+
+    syncSizeOptions();
+    renderSelectionSummary(
+      selectionSummary,
+      catalogProviders,
+      currentCatalogModel(),
+      customProvider,
+      !providerSelect.value ? 'default' : 'selected',
+    );
   }
 
   async function submitGeneration() {
@@ -177,7 +320,7 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
       return;
     }
 
-    let size = sizeSelect.value || '1024x1024';
+    let size = sizeSelect.value || 'custom';
     if (size === 'custom') {
       const validation = validateCustomSize(customSizeInput.value);
       if (!validation.ok) {
@@ -193,8 +336,20 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
       response_format: 'url',
       size: size,
     };
-    if (providerSelect.value) {
+
+    const customProvider = customProviderByValue(customProviders, providerSelect.value);
+    const catalogProviderId = currentCatalogProviderId();
+    if (customProvider) {
       payload.model = providerSelect.value;
+      const provider_model = modelInput.value.trim() || customProvider.default_model || '';
+      if (provider_model) payload['provider_model'] = provider_model;
+    } else if (catalogProviderId) {
+      const model = currentCatalogModel();
+      if (!model) {
+        toast(t('generateImage.modelRequired'), 'error');
+        return;
+      }
+      payload.model = routeModelValue(model);
     } else if (modelInput.value.trim()) {
       payload.model = modelInput.value.trim();
     }
@@ -213,11 +368,14 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
     }
   }
 
-  providerSelect.addEventListener('change', syncProviderModel);
-  sizeSelect.addEventListener('change', syncCustomSize);
+  providerSelect.addEventListener('change', () => syncModelOptions(true));
+  modelSelect.addEventListener('change', () => {
+    syncSizeOptions();
+    renderSelectionSummary(selectionSummary, catalogProviders, currentCatalogModel(), null, 'selected');
+  });
+  sizeSelect.addEventListener('change', syncSizeFields);
   submit.addEventListener('click', submitGeneration);
-  syncProviderModel();
-  syncCustomSize();
+  syncModelOptions(true);
   renderResultEmpty(resultPanel);
 
   return [
@@ -238,10 +396,12 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
           field(t('generateImage.prompt'), promptInput, { className: 'span-2' }),
           el('div', { class: 'form-grid' },
             field(t('generateImage.provider'), providerSelect),
-            field(t('generateImage.model'), modelInput),
+            modelSelectField,
+            modelInputField,
             field(t('generateImage.size'), sizeSelect),
             field(t('generateImage.customSize'), customSizeInput),
           ),
+          sizeCapabilityWarning,
           el('div', { class: 'hint-box' }, el('span', {}, 'i'), providerStatus),
           el('div', { class: 'action-row creator-actions' },
             button(t('generateImage.promptCopilotAction'), {
@@ -255,7 +415,10 @@ function buildPage(providers, recentJobs, providerLoadFailed) {
         ),
       ),
       panel({ title: t('generateImage.preview'), className: 'preview-panel' },
-        el('div', { class: 'panel-body' }, resultPanel),
+        el('div', { class: 'panel-body' },
+          selectionSummary,
+          resultPanel,
+        ),
       ),
     ),
     panel({ title: t('generateImage.recentImages') },
@@ -271,21 +434,21 @@ export async function render() {
   const content = document.getElementById('content');
   mount(content, loadingState(t('common.loading')));
 
-  let providers = [];
-  let providerLoadFailed = false;
   try {
-    providers = await loadProviders();
-  } catch (_) {
-    providerLoadFailed = true;
-  }
-
-  try {
+    const catalog = await loadCatalog();
+    let customProviders = [];
+    let providerLoadFailed = false;
+    try {
+      customProviders = await loadProviders();
+    } catch (_) {
+      providerLoadFailed = true;
+    }
     const recentJobs = await loadRecentImageJobs();
-    mount(content, buildPage(providers, recentJobs, providerLoadFailed));
-  } catch (_) {
+    mount(content, buildPage(catalog, customProviders, recentJobs, providerLoadFailed));
+  } catch (error) {
     mount(content,
       pageHeader({ kicker: t('generateImage.kicker'), title: t('generateImage.title'), subtitle: t('generateImage.subtitle') }),
-      errorState(t('generateImage.error')),
+      errorState(t('generateImage.catalogError'), safeErrorMessage(error, t('generateImage.catalogError'))),
     );
   }
 }
