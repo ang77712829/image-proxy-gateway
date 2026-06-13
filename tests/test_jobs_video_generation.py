@@ -27,6 +27,14 @@ from fastapi import HTTPException  # noqa: E402
 
 import angemedia_gateway.config as C  # noqa: E402
 from angemedia_gateway.adapters.agnes_video import AgnesVideoError, AgnesVideoProvider  # noqa: E402
+from angemedia_gateway.providers.errors import (  # noqa: E402
+    BackendUnavailable,
+    ProviderAuthError,
+    ProviderProtocolError,
+    ProviderTaskFailed,
+    ProviderTimeout,
+    RateLimited,
+)
 from angemedia_gateway.routes import media as media_routes  # noqa: E402
 from angemedia_gateway.schemas import VideoRequest  # noqa: E402
 from angemedia_gateway.services.media_service import (  # noqa: E402
@@ -473,9 +481,31 @@ class AgnesVideoAdapterSafeMessageTest(_VideoJobTestBase):
             poll_interval=0,
         )
 
-    def test_submit_http_error_does_not_leak_raw_body(self) -> None:
-        """submit HTTP error 不泄露 upstream raw body。"""
-        marker = "AGNES_VIDEO_SUBMIT_RAW_BODY_SHOULD_NOT_LEAK"
+    def _client(self, *, post=None, get=None):
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def post(self, *args, **kwargs):
+                if isinstance(post, Exception):
+                    raise post
+                return post
+
+            async def get(self, *args, **kwargs):
+                if isinstance(get, Exception):
+                    raise get
+                return get
+
+        return Client()
+
+    def _patch_provider_client(self, client):
+        return patch("angemedia_gateway.adapters.agnes_video.provider_client", return_value=client)
+
+    def test_submit_uses_provider_client_with_trust_env_false_and_limits(self) -> None:
+        """submit 通过统一 provider_client，client 固定 trust_env=False 且带 limits。"""
 
         class Client:
             async def __aenter__(self):
@@ -485,39 +515,94 @@ class AgnesVideoAdapterSafeMessageTest(_VideoJobTestBase):
                 return None
 
             async def post(self, *args, **kwargs):
-                return httpx.Response(500, text=f"raw {marker}")
+                return httpx.Response(202, json={"task_id": "submit-task-001"})
 
-        with patch("angemedia_gateway.adapters.agnes_video.httpx.AsyncClient", return_value=Client()):
-            with self.assertRaises(AgnesVideoError) as caught:
+        with patch("angemedia_gateway.providers.http.httpx.AsyncClient", return_value=Client()) as async_client:
+            result = await_compat(self._provider().submit_task(self._make_request()))
+
+        self.assertEqual(result["task_id"], "submit-task-001")
+        self.assertFalse(async_client.call_args.kwargs["trust_env"])
+        self.assertIsInstance(async_client.call_args.kwargs["timeout"], httpx.Timeout)
+        self.assertIsInstance(async_client.call_args.kwargs["limits"], httpx.Limits)
+
+    def test_submit_http_error_does_not_leak_raw_body(self) -> None:
+        """submit HTTP error 不泄露 upstream raw body。"""
+        marker = "AGNES_VIDEO_SUBMIT_RAW_BODY_SHOULD_NOT_LEAK"
+        client = self._client(post=httpx.Response(500, text=f"raw {marker} sk-secret-token"))
+
+        with self._patch_provider_client(client):
+            with self.assertRaises(BackendUnavailable) as caught:
                 await_compat(self._provider().submit_task(self._make_request()))
 
         text = str(caught.exception)
         self.assertIn("HTTP 500", text)
         self.assertNotIn(marker, text)
         self.assertNotIn("raw", text)
+        self.assertNotIn("sk-secret-token", text)
+        self.assertEqual(caught.exception.error_category, "upstream")
 
     def test_poll_http_error_does_not_leak_raw_body(self) -> None:
         """poll HTTP error 不泄露 upstream raw body。"""
         marker = "AGNES_VIDEO_POLL_RAW_BODY_SHOULD_NOT_LEAK"
+        client = self._client(get=httpx.Response(500, text=f"raw {marker} sk-secret-token"))
 
-        class Client:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return None
-
-            async def get(self, *args, **kwargs):
-                return httpx.Response(500, text=f"raw {marker}")
-
-        with patch("angemedia_gateway.adapters.agnes_video.httpx.AsyncClient", return_value=Client()):
-            with self.assertRaises(AgnesVideoError) as caught:
+        with self._patch_provider_client(client):
+            with self.assertRaises(BackendUnavailable) as caught:
                 await_compat(self._provider().poll_task("poll-task-safe-message"))
 
         text = str(caught.exception)
         self.assertIn("HTTP 500", text)
         self.assertNotIn(marker, text)
         self.assertNotIn("raw", text)
+        self.assertNotIn("sk-secret-token", text)
+        self.assertEqual(caught.exception.error_category, "upstream")
+
+    def test_submit_invalid_json_is_protocol_error_without_raw_body(self) -> None:
+        marker = "AGNES_VIDEO_INVALID_JSON_SHOULD_NOT_LEAK"
+        client = self._client(post=httpx.Response(200, text=f"not-json {marker} sk-secret-token"))
+
+        with self._patch_provider_client(client):
+            with self.assertRaises(ProviderProtocolError) as caught:
+                await_compat(self._provider().submit_task(self._make_request()))
+
+        text = str(caught.exception)
+        self.assertIn("invalid JSON", text)
+        self.assertEqual(caught.exception.error_category, "protocol")
+        self.assertNotIn(marker, text)
+        self.assertNotIn("sk-secret-token", text)
+
+    def test_submit_timeout_and_network_errors_are_structured_and_safe(self) -> None:
+        timeout_client = self._client(post=httpx.ReadTimeout("sk-timeout-secret token password"))
+        with self._patch_provider_client(timeout_client):
+            with self.assertRaises(ProviderTimeout) as caught_timeout:
+                await_compat(self._provider().submit_task(self._make_request()))
+        self.assertEqual(caught_timeout.exception.error_category, "timeout")
+        self.assertNotIn("sk-timeout-secret", str(caught_timeout.exception))
+
+        network_client = self._client(post=httpx.ConnectError("sk-network-secret token password"))
+        with self._patch_provider_client(network_client):
+            with self.assertRaises(BackendUnavailable) as caught_network:
+                await_compat(self._provider().submit_task(self._make_request()))
+        self.assertEqual(caught_network.exception.error_category, "network")
+        self.assertNotIn("sk-network-secret", str(caught_network.exception))
+
+    def test_submit_status_errors_are_classified(self) -> None:
+        cases = [
+            (401, ProviderAuthError, "auth"),
+            (429, RateLimited, "rate_limit"),
+            (500, BackendUnavailable, "upstream"),
+        ]
+        for status_code, expected_type, category in cases:
+            with self.subTest(status_code=status_code):
+                client = self._client(post=httpx.Response(status_code, text="sk-secret raw upstream body"))
+                with self._patch_provider_client(client):
+                    with self.assertRaises(expected_type) as caught:
+                        await_compat(self._provider().submit_task(self._make_request()))
+                text = str(caught.exception)
+                self.assertIn(f"HTTP {status_code}", text)
+                self.assertEqual(caught.exception.error_category, category)
+                self.assertNotIn("sk-secret", text)
+                self.assertNotIn("raw upstream body", text)
 
     def test_missing_task_id_does_not_leak_submit_dict(self) -> None:
         """missing task_id 不泄露 submit 原始 dict。"""
@@ -525,11 +610,12 @@ class AgnesVideoAdapterSafeMessageTest(_VideoJobTestBase):
         provider = self._provider()
         provider.submit_task = AsyncMock(return_value={"error": marker})  # type: ignore[method-assign]
 
-        with self.assertRaises(AgnesVideoError) as caught:
+        with self.assertRaises(ProviderProtocolError) as caught:
             await_compat(provider.generate_video(self._make_request(wait_for_completion=True)))
 
         text = str(caught.exception)
-        self.assertIn("缺少 task_id", text)
+        self.assertIn("missing task_id", text)
+        self.assertEqual(caught.exception.error_category, "protocol")
         self.assertNotIn(marker, text)
         self.assertNotIn("'error'", text)
         self.assertNotIn('"error"', text)
@@ -541,24 +627,47 @@ class AgnesVideoAdapterSafeMessageTest(_VideoJobTestBase):
         provider.submit_task = AsyncMock(return_value={"task_id": "failed-task-001"})  # type: ignore[method-assign]
         provider.poll_task = AsyncMock(return_value={"status": "failed", "error": marker})  # type: ignore[method-assign]
 
-        with self.assertRaises(AgnesVideoError) as caught:
+        with self.assertRaises(ProviderTaskFailed) as caught:
             await_compat(provider.generate_video(self._make_request(wait_for_completion=True)))
 
         text = str(caught.exception)
-        self.assertIn("任务失败", text)
+        self.assertIn("task failed", text)
         self.assertIn("failed", text)
+        self.assertEqual(caught.exception.error_category, "task_failed")
         self.assertNotIn(marker, text)
         self.assertNotIn("'error'", text)
         self.assertNotIn('"error"', text)
+
+    def test_generate_video_poll_timeout_is_structured(self) -> None:
+        provider = AgnesVideoProvider(
+            api_key="av-test-secret-token-123456",
+            base_url="https://agnes.example.test/v1",
+            max_poll_time=0,
+            poll_interval=0,
+        )
+        provider.submit_task = AsyncMock(return_value={"task_id": "timeout-task-001"})  # type: ignore[method-assign]
+
+        with self.assertRaises(ProviderTimeout) as caught:
+            await_compat(provider.generate_video(self._make_request(wait_for_completion=True)))
+
+        self.assertEqual(caught.exception.error_category, "timeout")
+        self.assertNotIn("av-test-secret-token", str(caught.exception))
+
+    def test_agnes_video_error_legacy_name_is_structured_provider_error(self) -> None:
+        self.assertIsInstance(AgnesVideoError("safe legacy message"), BackendUnavailable)
 
     def test_agnes_video_errors_do_not_reference_raw_response_text(self) -> None:
         """静态防线：Agnes video 生产代码不得引用 raw response body/dict。"""
         source = (ROOT / "scripts" / "angemedia_gateway" / "adapters" / "agnes_video.py").read_text(encoding="utf-8")
         forbidden = [
+            "httpx.AsyncClient",
+            "resp.json",
+            "response.json",
             "resp.text",
             "response.text",
             ".text[:300]",
             ".text[:200]",
+            "str(exc)",
             ": {data}",
             ": {task}",
             ": {result}",

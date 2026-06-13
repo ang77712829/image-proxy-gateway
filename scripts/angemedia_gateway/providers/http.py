@@ -24,10 +24,16 @@ def provider_timeout(timeout: float | None = None) -> httpx.Timeout:
     return httpx.Timeout(value)
 
 
+def provider_limits() -> httpx.Limits:
+    """Build provider connection limits explicitly instead of relying on env defaults."""
+
+    return httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+
+
 def provider_client(*, timeout: float | None = None) -> httpx.AsyncClient:
     """Create a provider HTTP client that ignores ambient proxy env vars."""
 
-    return httpx.AsyncClient(timeout=provider_timeout(timeout), trust_env=False)
+    return httpx.AsyncClient(timeout=provider_timeout(timeout), limits=provider_limits(), trust_env=False)
 
 
 async def request_with_provider_errors(

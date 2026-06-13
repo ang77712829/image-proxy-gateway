@@ -10,12 +10,19 @@ import asyncio
 import time
 from typing import Any
 
-import httpx
-
+from ..providers.errors import (
+    BackendUnavailable,
+    ProviderAuthError,
+    ProviderProtocolError,
+    ProviderTaskFailed,
+    ProviderTimeout,
+)
+from ..providers.http import provider_client, request_with_provider_errors, safe_json_response
+from ..providers.parsers import require_mapping
 from ..schemas import VideoRequest
 
 
-class AgnesVideoError(RuntimeError):
+class AgnesVideoError(BackendUnavailable):
     """Agnes 视频接口错误。"""
 
 
@@ -79,50 +86,40 @@ class AgnesVideoProvider:
 
     async def submit_task(self, req: VideoRequest) -> dict[str, Any]:
         if not self.api_key:
-            raise AgnesVideoError("AGNES_API_KEY is not configured")
+            raise ProviderAuthError("agnes_video submit failed: auth")
 
         payload = self.build_payload(req)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/videos",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
+        data = await self._request_json(
+            "POST",
+            f"{self.base_url}/videos",
+            operation="submit",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
-        if resp.status_code == 401:
-            raise AgnesVideoError("Agnes AI API key is invalid or expired")
-        if resp.status_code == 429:
-            raise AgnesVideoError("Agnes AI video provider rate limited")
-        if resp.status_code not in (200, 201, 202):
-            raise AgnesVideoError(f"Agnes Video 提交任务失败：HTTP {resp.status_code}")
-
-        return self.normalize_submit(resp.json())
+        return self.normalize_submit(data)
 
     async def poll_task(self, task_id: str) -> dict[str, Any]:
         if not self.api_key:
-            raise AgnesVideoError("AGNES_API_KEY is not configured")
+            raise ProviderAuthError("agnes_video poll failed: auth")
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(
-                f"{self.base_url}/videos/{task_id}",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-            )
+        data = await self._request_json(
+            "GET",
+            f"{self.base_url}/videos/{task_id}",
+            operation="poll",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+        )
 
-        if resp.status_code == 401:
-            raise AgnesVideoError("Agnes AI API key is invalid or expired")
-        if resp.status_code not in (200, 201, 202):
-            raise AgnesVideoError(f"Agnes Video 轮询任务失败：HTTP {resp.status_code}")
-
-        return self.normalize_poll(resp.json(), task_id)
+        return self.normalize_poll(data, task_id)
 
     async def generate_video(self, req: VideoRequest) -> dict[str, Any]:
         submit = await self.submit_task(req)
         task_id = submit.get("task_id") or submit.get("id")
         if not task_id:
-            raise AgnesVideoError("Agnes Video 提交响应缺少 task_id")
+            raise ProviderProtocolError("agnes_video submit failed: missing task_id")
 
         deadline = time.time() + self.max_poll_time
         while time.time() < deadline:
@@ -133,9 +130,26 @@ class AgnesVideoProvider:
                 return result
             if status in {"failed", "error", "cancelled"}:
                 safe_status = str(status or "unknown")[:64]
-                raise AgnesVideoError(f"Agnes Video 任务失败：{safe_status}")
+                raise ProviderTaskFailed(f"agnes_video task failed: {safe_status}")
 
-        raise AgnesVideoError(f"Agnes AI video polling timed out after {self.max_poll_time}s")
+        raise ProviderTimeout("agnes_video poll failed: timeout")
+
+    async def _request_json(self, method: str, url: str, *, operation: str, **kwargs: Any) -> dict[str, Any]:
+        async with provider_client(timeout=self.timeout) as client:
+            response = await request_with_provider_errors(
+                client,
+                method,
+                url,
+                provider=self.name,
+                operation=operation,
+                ok_statuses=(200, 201, 202),
+                **kwargs,
+            )
+        return require_mapping(
+            safe_json_response(response, provider=self.name, operation=operation),
+            provider=self.name,
+            operation=operation,
+        )
 
     @staticmethod
     def normalize_submit(data: dict[str, Any]) -> dict[str, Any]:
