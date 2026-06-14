@@ -18,6 +18,36 @@ VALID_CAPABILITIES = {
     "text_to_video",
     "image_to_video",
 }
+VALID_PARAM_KINDS = {"string", "int", "float", "bool", "enum", "seed"}
+VALID_SIZE_MODES = {"preset", "freeform"}
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    kind: str
+    default: Any | None
+    min: int | float | None
+    max: int | float | None
+    enum_values: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class SizeSpec:
+    mode: str
+    presets: tuple[str, ...]
+    min_width: int | None
+    max_width: int | None
+    min_height: int | None
+    max_height: int | None
+    multiple_of: int | None
+
+
+@dataclass(frozen=True)
+class RefInputSpec:
+    roles: tuple[str, ...]
+    max_total: int | None
+    formats: tuple[str, ...]
+    required: bool
 
 
 @dataclass(frozen=True)
@@ -48,8 +78,11 @@ class ModelCatalogEntry:
     default_chain_order: int | None
     capabilities: dict[str, bool]
     params: dict[str, Any]
+    param_specs: dict[str, ParamSpec]
     size_presets: tuple[str, ...]
+    size: SizeSpec
     ref_inputs: dict[str, Any]
+    ref_input_spec: RefInputSpec
     extra_allowlist: tuple[str, ...]
     tags: tuple[str, ...]
 

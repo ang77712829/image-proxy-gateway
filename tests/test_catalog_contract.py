@@ -31,7 +31,9 @@ from angemedia_gateway.providers.catalog.loader import (  # noqa: E402
 from angemedia_gateway.providers.catalog.schema import (  # noqa: E402
     VALID_MEDIA_TYPES,
     VALID_MODEL_STATUSES,
+    VALID_PARAM_KINDS,
     VALID_PROVIDER_STATUSES,
+    VALID_SIZE_MODES,
 )
 from angemedia_gateway.request_hash_builders import build_image_request_hash_payload  # noqa: E402
 from angemedia_gateway.routing import DEFAULT_CHAIN, MODEL_ALIASES, resolve_chain  # noqa: E402
@@ -80,14 +82,22 @@ class CatalogYamlContractTest(unittest.TestCase):
                 self.assertIn(model.media_type, providers[model.provider].media_types)
                 self.assertIsInstance(model.capabilities, dict)
                 self.assertIsInstance(model.params, dict)
+                self.assertIsInstance(model.param_specs, dict)
                 self.assertIsInstance(model.ref_inputs, dict)
+                self.assertIsInstance(model.ref_input_spec.roles, tuple)
                 self.assertIsInstance(model.size_presets, tuple)
+                self.assertIn(model.size.mode, VALID_SIZE_MODES)
+                self.assertIsInstance(model.size.presets, tuple)
                 self.assertTrue(all(isinstance(item, str) and item for item in model.size_presets))
+                self.assertTrue(all(item.kind in VALID_PARAM_KINDS for item in model.param_specs.values()))
                 self.assertTrue(all(isinstance(item, str) and item for item in model.aliases))
                 self.assertTrue(all(isinstance(item, str) and item for item in model.extra_allowlist))
                 self.assertTrue(all(isinstance(item, str) and item for item in model.tags))
                 json.dumps(model.params)
+                json.dumps({key: value.__dict__ for key, value in model.param_specs.items()})
                 json.dumps(model.ref_inputs)
+                json.dumps(model.ref_input_spec.__dict__)
+                json.dumps(model.size.__dict__)
 
     def test_provider_catalog_source_fields_are_complete_unique_and_not_custom(self) -> None:
         provider_ids = [provider.id for provider in self.catalog.providers]
@@ -139,6 +149,27 @@ class CatalogYamlContractTest(unittest.TestCase):
                 "    python_import: unsafe\n    notes: Default image chain entry for Kolors.",
                 "unknown key",
             ),
+            (
+                "unknown_param_kind",
+                "models.yaml",
+                "    params: {}\n    size_presets: [1024x1024, 1024x768, 768x1024]",
+                "    params: {}\n    param_specs:\n      seed:\n        kind: timestamp\n    size_presets: [1024x1024, 1024x768, 768x1024]",
+                "invalid param kind",
+            ),
+            (
+                "bad_size_mode_without_presets",
+                "models.yaml",
+                "    params: {}\n    size_presets: [1024x1024, 1024x768, 768x1024]",
+                "    params: {}\n    size_presets: []\n    size:\n      mode: preset",
+                "presets must not be empty",
+            ),
+            (
+                "required_ref_input_without_roles",
+                "models.yaml",
+                "    ref_inputs: {}\n    extra_allowlist: []",
+                "    ref_inputs: {}\n    ref_input_spec:\n      required: true\n    extra_allowlist: []",
+                "roles must not be empty",
+            ),
         ]
 
         for name, filename, old, new, pattern in cases:
@@ -146,6 +177,66 @@ class CatalogYamlContractTest(unittest.TestCase):
                 replace_once(copied / filename, old, new)
                 with self.assertRaisesRegex(CatalogValidationError, pattern):
                     load_provider_catalog(copied)
+
+    def test_loader_derives_typed_capability_specs_from_legacy_fields(self) -> None:
+        video = self.catalog.models_by_id["agnes-video-v2-0"]
+        self.assertEqual(video.param_specs["width"].kind, "int")
+        self.assertEqual(video.param_specs["height"].kind, "int")
+        self.assertEqual(video.size.mode, "preset")
+        self.assertEqual(video.size.presets, video.size_presets)
+        self.assertEqual(video.ref_input_spec.roles, ("image", "images"))
+        self.assertFalse(video.ref_input_spec.required)
+
+        qwen = self.catalog.models_by_id["qwen"]
+        self.assertEqual(qwen.size.mode, "freeform")
+        self.assertEqual(qwen.size.presets, ())
+
+    def test_loader_accepts_explicit_typed_capability_fields_and_projects_them(self) -> None:
+        with catalog_copy() as copied:
+            replace_once(
+                copied / "models.yaml",
+                (
+                    "    params: {}\n"
+                    "    size_presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "    ref_inputs: {}\n"
+                ),
+                (
+                    "    params: {}\n"
+                    "    param_specs:\n"
+                    "      seed:\n"
+                    "        kind: seed\n"
+                    "        min: 0\n"
+                    "        max: 4294967295\n"
+                    "    size_presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "    size:\n"
+                    "      mode: preset\n"
+                    "      presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "      min_width: 512\n"
+                    "      max_width: 2048\n"
+                    "      min_height: 512\n"
+                    "      max_height: 2048\n"
+                    "      multiple_of: 64\n"
+                    "    ref_inputs: {}\n"
+                    "    ref_input_spec:\n"
+                    "      roles: [image]\n"
+                    "      max_total: 1\n"
+                    "      formats: [png, jpg]\n"
+                    "      required: false\n"
+                ),
+            )
+            catalog = load_provider_catalog(copied)
+            model = catalog.models_by_id["kolors"]
+            self.assertEqual(model.param_specs["seed"].kind, "seed")
+            self.assertEqual(model.param_specs["seed"].min, 0)
+            self.assertEqual(model.size.multiple_of, 64)
+            self.assertEqual(model.ref_input_spec.formats, ("png", "jpg"))
+
+            projected = catalog_api_response(catalog)
+            projected_model = {item["id"]: item for item in projected["models"]}["kolors"]
+            self.assertEqual(projected_model["param_specs"]["seed"]["kind"], "seed")
+            self.assertEqual(projected_model["size"]["mode"], "preset")
+            self.assertEqual(projected_model["size"]["multiple_of"], 64)
+            self.assertEqual(projected_model["ref_input_spec"]["roles"], ["image"])
 
 
 class CatalogApiProjectionContractTest(unittest.TestCase):
@@ -189,8 +280,11 @@ class CatalogApiProjectionContractTest(unittest.TestCase):
             "provider_model",
             "media_type",
             "size_presets",
+            "size",
             "params",
+            "param_specs",
             "ref_inputs",
+            "ref_input_spec",
             "capabilities",
             "extra_allowlist",
         ):
@@ -199,8 +293,11 @@ class CatalogApiProjectionContractTest(unittest.TestCase):
         self.assertEqual(model["provider_model"], "agnes-video-v2.0")
         self.assertEqual(model["media_type"], "video")
         self.assertIsInstance(model["size_presets"], list)
+        self.assertIsInstance(model["size"], dict)
         self.assertIsInstance(model["params"], dict)
+        self.assertIsInstance(model["param_specs"], dict)
         self.assertIsInstance(model["ref_inputs"], dict)
+        self.assertIsInstance(model["ref_input_spec"], dict)
 
         rendered = json.dumps(body, ensure_ascii=False).lower()
         for forbidden in ("api_key", "credential_keys", "password", "secret", "token"):

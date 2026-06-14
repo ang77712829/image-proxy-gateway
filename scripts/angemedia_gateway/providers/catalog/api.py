@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .schema import ModelCatalogEntry, ProviderCatalog, ProviderCatalogEntry
+from .schema import ModelCatalogEntry, ParamSpec, ProviderCatalog, ProviderCatalogEntry, RefInputSpec, SizeSpec
 
 
 def catalog_api_response(catalog: ProviderCatalog) -> dict[str, Any]:
@@ -54,8 +54,42 @@ def _model_entry(model: ModelCatalogEntry) -> dict[str, Any]:
         "default_chain_order": model.default_chain_order,
         "capabilities": dict(model.capabilities),
         "params": dict(model.params),
+        "param_specs": {key: _param_spec(value) for key, value in model.param_specs.items()},
         "size_presets": list(model.size_presets),
+        "size": _size_spec(model.size),
         "ref_inputs": dict(model.ref_inputs),
+        "ref_input_spec": _ref_input_spec(model.ref_input_spec),
         "extra_allowlist": list(model.extra_allowlist),
         "tags": list(model.tags),
+    }
+
+
+def _param_spec(spec: ParamSpec) -> dict[str, Any]:
+    return {
+        "kind": spec.kind,
+        "default": spec.default,
+        "min": spec.min,
+        "max": spec.max,
+        "enum_values": list(spec.enum_values),
+    }
+
+
+def _size_spec(spec: SizeSpec) -> dict[str, Any]:
+    return {
+        "mode": spec.mode,
+        "presets": list(spec.presets),
+        "min_width": spec.min_width,
+        "max_width": spec.max_width,
+        "min_height": spec.min_height,
+        "max_height": spec.max_height,
+        "multiple_of": spec.multiple_of,
+    }
+
+
+def _ref_input_spec(spec: RefInputSpec) -> dict[str, Any]:
+    return {
+        "roles": list(spec.roles),
+        "max_total": spec.max_total,
+        "formats": list(spec.formats),
+        "required": spec.required,
     }
