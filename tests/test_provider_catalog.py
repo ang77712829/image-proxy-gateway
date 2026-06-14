@@ -67,10 +67,13 @@ class ProviderCatalogTest(unittest.TestCase):
         self.assertIn("ref_input_spec", models["agnes-video-v2-0"])
         self.assertIn("size_presets", models["agnes-video-v2-0"])
         self.assertIn("size", models["agnes-video-v2-0"])
+        self.assertIn("operations", models["agnes-video-v2-0"])
         self.assertIn("capabilities", models["agnes-video-v2-0"])
         self.assertEqual(models["agnes-video-v2-0"]["param_specs"]["width"]["kind"], "int")
         self.assertEqual(models["agnes-video-v2-0"]["size"]["mode"], "preset")
         self.assertEqual(models["agnes-video-v2-0"]["ref_input_spec"]["roles"], ["image", "images"])
+        self.assertEqual(models["kolors"]["operations"]["text_to_image"]["params"]["size"]["provider_field"], "image_size")
+        self.assertEqual(models["qwen"]["operations"], {})
 
         response_text = str(response).lower()
         for forbidden in ("credential_keys", "api_key", "token", "password", "secret"):

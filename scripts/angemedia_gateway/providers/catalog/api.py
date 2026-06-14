@@ -3,7 +3,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from .schema import ModelCatalogEntry, ParamSpec, ProviderCatalog, ProviderCatalogEntry, RefInputSpec, SizeSpec
+from .schema import (
+    ModelCatalogEntry,
+    OperationParamSpec,
+    OperationRefSpec,
+    OperationSizePreset,
+    OperationSpec,
+    ParamSpec,
+    ProviderCatalog,
+    ProviderCatalogEntry,
+    RefInputSpec,
+    SizeSpec,
+)
 
 
 def catalog_api_response(catalog: ProviderCatalog) -> dict[str, Any]:
@@ -59,6 +70,7 @@ def _model_entry(model: ModelCatalogEntry) -> dict[str, Any]:
         "size": _size_spec(model.size),
         "ref_inputs": dict(model.ref_inputs),
         "ref_input_spec": _ref_input_spec(model.ref_input_spec),
+        "operations": {key: _operation_spec(value) for key, value in model.operations.items()},
         "extra_allowlist": list(model.extra_allowlist),
         "tags": list(model.tags),
     }
@@ -87,6 +99,45 @@ def _size_spec(spec: SizeSpec) -> dict[str, Any]:
 
 
 def _ref_input_spec(spec: RefInputSpec) -> dict[str, Any]:
+    return {
+        "roles": list(spec.roles),
+        "max_total": spec.max_total,
+        "formats": list(spec.formats),
+        "required": spec.required,
+    }
+
+
+def _operation_spec(spec: OperationSpec) -> dict[str, Any]:
+    return {
+        "supported": spec.supported,
+        "params": {key: _operation_param_spec(value) for key, value in spec.params.items()},
+        "refs": [_operation_ref_spec(item) for item in spec.refs],
+    }
+
+
+def _operation_param_spec(spec: OperationParamSpec) -> dict[str, Any]:
+    return {
+        "kind": spec.kind,
+        "required": spec.required,
+        "provider_field": spec.provider_field,
+        "evidence": spec.evidence,
+        "default": spec.default,
+        "min": spec.min,
+        "max": spec.max,
+        "enum_values": list(spec.enum_values),
+        "mode": spec.mode,
+        "presets": [_operation_size_preset(item) for item in spec.presets],
+    }
+
+
+def _operation_size_preset(spec: OperationSizePreset) -> dict[str, Any]:
+    return {
+        "value": spec.value,
+        "label": spec.label,
+    }
+
+
+def _operation_ref_spec(spec: OperationRefSpec) -> dict[str, Any]:
     return {
         "roles": list(spec.roles),
         "max_total": spec.max_total,

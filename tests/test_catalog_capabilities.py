@@ -62,6 +62,46 @@ class CatalogCapabilityTest(unittest.TestCase):
         self.assertEqual(kolors.size.mode, "preset")
         self.assertEqual(kolors.size.presets, kolors.size_presets)
 
+    def test_kolors_text_to_image_operation_metadata_is_projected_safely(self) -> None:
+        kolors = self.catalog.models_by_id["kolors"]
+        operation = kolors.operations["text_to_image"]
+
+        self.assertTrue(operation.supported)
+        self.assertEqual(operation.refs, ())
+        self.assertEqual(operation.params["prompt"].provider_field, "prompt")
+        self.assertEqual(operation.params["size"].provider_field, "image_size")
+        self.assertEqual(operation.params["negative_prompt"].provider_field, "negative_prompt")
+        self.assertEqual(operation.params["seed"].provider_field, "seed")
+        self.assertEqual(operation.params["seed"].min, 0)
+        self.assertEqual(operation.params["seed"].max, 9999999999)
+        self.assertEqual(operation.params["steps"].provider_field, "num_inference_steps")
+        self.assertEqual(operation.params["steps"].min, 1)
+        self.assertEqual(operation.params["steps"].max, 100)
+        self.assertEqual(operation.params["steps"].default, 20)
+        self.assertEqual(operation.params["guidance"].provider_field, "guidance_scale")
+        self.assertEqual(operation.params["guidance"].min, 0)
+        self.assertEqual(operation.params["guidance"].max, 20)
+        self.assertEqual(operation.params["guidance"].default, 7.5)
+        self.assertEqual(
+            [preset.value for preset in operation.params["size"].presets],
+            list(kolors.size_presets),
+        )
+
+        projected = self.api_models["kolors"]["operations"]["text_to_image"]
+        self.assertEqual(projected["params"]["size"]["presets"][0], {"value": "1024x1024", "label": "1:1"})
+        self.assertEqual(projected["params"]["steps"]["provider_field"], "num_inference_steps")
+        self.assertEqual(projected["params"]["guidance"]["provider_field"], "guidance_scale")
+        self.assertEqual(projected["refs"], [])
+        rendered = str(projected).lower()
+        for forbidden in ("api_key", "credential", "secret", "token"):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_non_kolors_models_have_no_operation_metadata_yet(self) -> None:
+        for model_id in ("qwen", "flux", "z-image", "z-turbo", "agnes-2-1"):
+            with self.subTest(model=model_id):
+                self.assertEqual(self.catalog.models_by_id[model_id].operations, {})
+                self.assertEqual(self.api_models[model_id]["operations"], {})
+
     def test_generate_image_size_options_remain_catalog_driven_with_custom_override(self) -> None:
         capabilities_source = CAPABILITIES_JS.read_text(encoding="utf-8")
         size_controls_source = SIZE_CONTROLS_JS.read_text(encoding="utf-8")

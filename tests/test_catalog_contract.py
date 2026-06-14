@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -31,6 +33,9 @@ from angemedia_gateway.providers.catalog.loader import (  # noqa: E402
 from angemedia_gateway.providers.catalog.schema import (  # noqa: E402
     VALID_MEDIA_TYPES,
     VALID_MODEL_STATUSES,
+    VALID_OPERATIONS,
+    VALID_OPERATION_EVIDENCE,
+    VALID_OPERATION_PARAM_KINDS,
     VALID_PARAM_KINDS,
     VALID_PROVIDER_STATUSES,
     VALID_SIZE_MODES,
@@ -60,6 +65,13 @@ def replace_once(path: Path, old: str, new: str) -> None:
     path.write_text(updated, encoding="utf-8")
 
 
+def mutate_first_model(catalog_dir: Path, mutator) -> None:
+    path = catalog_dir / "models.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    mutator(data["models"][0])
+    path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
 class CatalogYamlContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -85,11 +97,19 @@ class CatalogYamlContractTest(unittest.TestCase):
                 self.assertIsInstance(model.param_specs, dict)
                 self.assertIsInstance(model.ref_inputs, dict)
                 self.assertIsInstance(model.ref_input_spec.roles, tuple)
+                self.assertIsInstance(model.operations, dict)
                 self.assertIsInstance(model.size_presets, tuple)
                 self.assertIn(model.size.mode, VALID_SIZE_MODES)
                 self.assertIsInstance(model.size.presets, tuple)
                 self.assertTrue(all(isinstance(item, str) and item for item in model.size_presets))
                 self.assertTrue(all(item.kind in VALID_PARAM_KINDS for item in model.param_specs.values()))
+                self.assertTrue(set(model.operations).issubset(VALID_OPERATIONS))
+                for operation in model.operations.values():
+                    self.assertIsInstance(operation.params, dict)
+                    self.assertIsInstance(operation.refs, tuple)
+                    for param in operation.params.values():
+                        self.assertIn(param.kind, VALID_OPERATION_PARAM_KINDS)
+                        self.assertIn(param.evidence, VALID_OPERATION_EVIDENCE)
                 self.assertTrue(all(isinstance(item, str) and item for item in model.aliases))
                 self.assertTrue(all(isinstance(item, str) and item for item in model.extra_allowlist))
                 self.assertTrue(all(isinstance(item, str) and item for item in model.tags))
@@ -197,6 +217,7 @@ class CatalogYamlContractTest(unittest.TestCase):
         self.assertEqual(qwen.size.mode, "freeform")
         self.assertEqual(qwen.size.presets, ())
         self.assertEqual(qwen.size_presets, ())
+        self.assertEqual(qwen.operations, {})
 
     def test_loader_accepts_explicit_typed_capability_fields_and_projects_them(self) -> None:
         with catalog_copy() as copied:
@@ -248,6 +269,71 @@ class CatalogYamlContractTest(unittest.TestCase):
             self.assertEqual(projected_model["size"]["multiple_of"], 64)
             self.assertEqual(projected_model["ref_input_spec"]["roles"], ["image"])
 
+    def test_loader_rejects_bad_operation_capability_data(self) -> None:
+        cases = [
+            (
+                "operations_not_mapping",
+                lambda model: model.__setitem__("operations", []),
+                "operations must be a mapping",
+            ),
+            (
+                "unknown_operation",
+                lambda model: model["operations"].__setitem__("text_to_audio", model["operations"]["text_to_image"]),
+                "unknown operation",
+            ),
+            (
+                "params_not_mapping",
+                lambda model: model["operations"]["text_to_image"].__setitem__("params", []),
+                "params must be a mapping",
+            ),
+            (
+                "unknown_evidence",
+                lambda model: model["operations"]["text_to_image"]["params"]["steps"].__setitem__("evidence", "forum"),
+                "invalid value",
+            ),
+            (
+                "missing_provider_field",
+                lambda model: model["operations"]["text_to_image"]["params"]["steps"].pop("provider_field"),
+                "provider_field is required",
+            ),
+            (
+                "invalid_kind",
+                lambda model: model["operations"]["text_to_image"]["params"]["steps"].__setitem__("kind", "timestamp"),
+                "invalid operation param kind",
+            ),
+            (
+                "min_greater_than_max",
+                lambda model: model["operations"]["text_to_image"]["params"]["steps"].update({"min": 101, "max": 100}),
+                "min must be less than or equal to max",
+            ),
+            (
+                "preset_missing_value",
+                lambda model: model["operations"]["text_to_image"]["params"]["size"]["presets"].__setitem__(0, {"label": "bad"}),
+                "missing key: value",
+            ),
+            (
+                "preset_bad_format",
+                lambda model: model["operations"]["text_to_image"]["params"]["size"]["presets"][0].__setitem__("value", "wide"),
+                "WIDTHxHEIGHT",
+            ),
+            (
+                "refs_not_list",
+                lambda model: model["operations"]["text_to_image"].__setitem__("refs", {}),
+                "refs must be a list",
+            ),
+            (
+                "ref_missing_role_shape",
+                lambda model: model["operations"]["text_to_image"].__setitem__("refs", [{"formats": ["png"]}]),
+                "missing key: role",
+            ),
+        ]
+
+        for name, mutator, pattern in cases:
+            with self.subTest(name=name), catalog_copy() as copied:
+                mutate_first_model(copied, mutator)
+                with self.assertRaisesRegex(CatalogValidationError, pattern):
+                    load_provider_catalog(copied)
+
 
 class CatalogApiProjectionContractTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -295,6 +381,7 @@ class CatalogApiProjectionContractTest(unittest.TestCase):
             "param_specs",
             "ref_inputs",
             "ref_input_spec",
+            "operations",
             "capabilities",
             "extra_allowlist",
         ):

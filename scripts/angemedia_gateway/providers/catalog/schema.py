@@ -20,6 +20,15 @@ VALID_CAPABILITIES = {
 }
 VALID_PARAM_KINDS = {"string", "int", "float", "bool", "enum", "seed"}
 VALID_SIZE_MODES = {"preset", "freeform"}
+VALID_OPERATIONS = {
+    "text_to_image",
+    "image_to_image",
+    "image_edit",
+    "text_to_video",
+    "image_to_video",
+}
+VALID_OPERATION_PARAM_KINDS = VALID_PARAM_KINDS | {"size"}
+VALID_OPERATION_EVIDENCE = {"official_api", "official_model_page", "third_party", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -48,6 +57,41 @@ class RefInputSpec:
     max_total: int | None
     formats: tuple[str, ...]
     required: bool
+
+
+@dataclass(frozen=True)
+class OperationSizePreset:
+    value: str
+    label: str | None
+
+
+@dataclass(frozen=True)
+class OperationParamSpec:
+    kind: str
+    required: bool
+    provider_field: str | None
+    evidence: str
+    default: Any | None
+    min: int | float | None
+    max: int | float | None
+    enum_values: tuple[Any, ...]
+    mode: str | None
+    presets: tuple[OperationSizePreset, ...]
+
+
+@dataclass(frozen=True)
+class OperationRefSpec:
+    roles: tuple[str, ...]
+    max_total: int | None
+    formats: tuple[str, ...]
+    required: bool
+
+
+@dataclass(frozen=True)
+class OperationSpec:
+    supported: bool
+    params: dict[str, OperationParamSpec]
+    refs: tuple[OperationRefSpec, ...]
 
 
 @dataclass(frozen=True)
@@ -83,6 +127,7 @@ class ModelCatalogEntry:
     size: SizeSpec
     ref_inputs: dict[str, Any]
     ref_input_spec: RefInputSpec
+    operations: dict[str, OperationSpec]
     extra_allowlist: tuple[str, ...]
     tags: tuple[str, ...]
 
