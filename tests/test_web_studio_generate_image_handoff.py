@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATE_IMAGE_JS = ROOT / "app" / "www" / "assets" / "studio" / "features" / "generate-image" / "page.js"
+GENERATE_IMAGE_DIR = ROOT / "app" / "www" / "assets" / "studio" / "features" / "generate-image"
 CAPABILITIES_JS = ROOT / "app" / "www" / "assets" / "studio" / "lib" / "capabilities.js"
 SAFE_ERROR_JS = ROOT / "app" / "www" / "assets" / "studio" / "lib" / "safe-error.js"
 I18N_JS = ROOT / "app" / "www" / "assets" / "studio" / "i18n.js"
@@ -17,6 +17,10 @@ def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def read_feature_source(path: Path) -> str:
+    return "\n".join(read_source(item) for item in sorted(path.glob("*.js")))
+
+
 def compact(source: str) -> str:
     return re.sub(r"\s+", " ", source)
 
@@ -24,7 +28,7 @@ def compact(source: str) -> str:
 class WebStudioGenerateImageHandoffSourceContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.source = read_source(GENERATE_IMAGE_JS)
+        cls.source = read_feature_source(GENERATE_IMAGE_DIR)
         cls.compact_source = compact(cls.source)
         cls.capabilities_source = read_source(CAPABILITIES_JS)
         cls.safe_error_source = read_source(SAFE_ERROR_JS)

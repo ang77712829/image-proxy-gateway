@@ -27,6 +27,10 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def read_feature(path: Path) -> str:
+    return "\n".join(read(item) for item in sorted(path.glob("*.js")))
+
+
 def studio_sources() -> dict[Path, str]:
     return {path: read(path) for path in STUDIO_ROOT.rglob("*.js")}
 
@@ -198,7 +202,7 @@ class WebStudioRebuildSourceContractTest(unittest.TestCase):
 
     def test_generate_image_catalog_capability_contract(self) -> None:
         """Generate Image should follow the same minimal catalog-aware pattern as Generate Video."""
-        generate_image_source = read(STUDIO_ROOT / "features" / "generate-image" / "page.js")
+        generate_image_source = read_feature(STUDIO_ROOT / "features" / "generate-image")
         self.assertIn("api.get('/admin/catalog')", generate_image_source)
         self.assertIn("selectableImageModels", generate_image_source)
         self.assertIn("imageProvidersForModels", generate_image_source)
