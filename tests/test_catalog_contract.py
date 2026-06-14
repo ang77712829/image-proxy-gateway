@@ -152,14 +152,20 @@ class CatalogYamlContractTest(unittest.TestCase):
             (
                 "unknown_param_kind",
                 "models.yaml",
-                "    params: {}\n    size_presets: [1024x1024, 1024x768, 768x1024]",
-                "    params: {}\n    param_specs:\n      seed:\n        kind: timestamp\n    size_presets: [1024x1024, 1024x768, 768x1024]",
+                "    params: {}\n    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]",
+                "    params: {}\n    param_specs:\n      seed:\n        kind: timestamp\n    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]",
                 "invalid param kind",
             ),
             (
                 "bad_size_mode_without_presets",
                 "models.yaml",
-                "    params: {}\n    size_presets: [1024x1024, 1024x768, 768x1024]",
+                (
+                    "    params: {}\n"
+                    "    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]\n"
+                    "    size:\n"
+                    "      mode: preset\n"
+                    "      presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]"
+                ),
                 "    params: {}\n    size_presets: []\n    size:\n      mode: preset",
                 "presets must not be empty",
             ),
@@ -189,7 +195,8 @@ class CatalogYamlContractTest(unittest.TestCase):
 
         qwen = self.catalog.models_by_id["qwen"]
         self.assertEqual(qwen.size.mode, "freeform")
-        self.assertEqual(qwen.size.presets, ())
+        self.assertEqual(qwen.size.presets, qwen.size_presets)
+        self.assertTrue(qwen.size.presets)
 
     def test_loader_accepts_explicit_typed_capability_fields_and_projects_them(self) -> None:
         with catalog_copy() as copied:
@@ -197,7 +204,10 @@ class CatalogYamlContractTest(unittest.TestCase):
                 copied / "models.yaml",
                 (
                     "    params: {}\n"
-                    "    size_presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]\n"
+                    "    size:\n"
+                    "      mode: preset\n"
+                    "      presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]\n"
                     "    ref_inputs: {}\n"
                 ),
                 (
@@ -207,10 +217,10 @@ class CatalogYamlContractTest(unittest.TestCase):
                     "        kind: seed\n"
                     "        min: 0\n"
                     "        max: 4294967295\n"
-                    "    size_presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]\n"
                     "    size:\n"
                     "      mode: preset\n"
-                    "      presets: [1024x1024, 1024x768, 768x1024]\n"
+                    "      presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]\n"
                     "      min_width: 512\n"
                     "      max_width: 2048\n"
                     "      min_height: 512\n"
@@ -400,7 +410,8 @@ class RoutingCompatibilityContractTest(unittest.TestCase):
 
     def test_known_capability_gaps_are_recorded_without_blocking_current_contract(self) -> None:
         # Known v0.2.1 cleanup targets:
-        # - ModelScope size presets are mostly empty, so Studio falls back to custom size.
+        # - ModelScope catalog now declares size capability, but the adapter still
+        #   does not forward req.size to the upstream submit payload.
         # - routing.py still duplicates catalog aliases/default chain/provider_model values.
         # - ref_inputs are catalog data but not first-class Generate Image UI controls yet.
         # - Generate Video renders ref_inputs as disabled placeholders.

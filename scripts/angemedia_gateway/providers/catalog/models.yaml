@@ -11,7 +11,10 @@ models:
     capabilities:
       text_to_image: true
     params: {}
-    size_presets: [1024x1024, 1024x768, 768x1024]
+    size_presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]
+    size:
+      mode: preset
+      presets: [1024x1024, 960x1280, 768x1024, 720x1440, 720x1280]
     ref_inputs: {}
     extra_allowlist: []
     tags: [default_chain]
@@ -28,7 +31,15 @@ models:
     capabilities:
       text_to_image: true
     params: {}
-    size_presets: []
+    size_presets: [1024x1024, 1024x768, 768x1024]
+    size:
+      mode: freeform
+      presets: [1024x1024, 1024x768, 768x1024]
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      multiple_of: 64
     ref_inputs: {}
     extra_allowlist: []
     tags: [default_chain]
@@ -45,7 +56,15 @@ models:
     capabilities:
       text_to_image: true
     params: {}
-    size_presets: []
+    size_presets: [1024x1024, 1024x768, 768x1024]
+    size:
+      mode: freeform
+      presets: [1024x1024, 1024x768, 768x1024]
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      multiple_of: 64
     ref_inputs: {}
     extra_allowlist: []
     tags: [default_chain]
@@ -62,7 +81,15 @@ models:
     capabilities:
       text_to_image: true
     params: {}
-    size_presets: []
+    size_presets: [1024x1024, 1024x768, 768x1024]
+    size:
+      mode: freeform
+      presets: [1024x1024, 1024x768, 768x1024]
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      multiple_of: 64
     ref_inputs: {}
     extra_allowlist: []
     tags: [default_chain]
@@ -79,7 +106,15 @@ models:
     capabilities:
       text_to_image: true
     params: {}
-    size_presets: []
+    size_presets: [1024x1024, 1024x768, 768x1024]
+    size:
+      mode: freeform
+      presets: [1024x1024, 1024x768, 768x1024]
+      min_width: 512
+      max_width: 2048
+      min_height: 512
+      max_height: 2048
+      multiple_of: 64
     ref_inputs: {}
     extra_allowlist: []
     tags: [default_chain]
